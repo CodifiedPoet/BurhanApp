@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "scanmaker"
+version = "1.0.0"
+description = "PDF scan annotation & export tool with a CustomTkinter UI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    "customtkinter>=5.2",
+    "PyMuPDF>=1.27",
+    "Pillow>=10.0",
+]
+
+[project.scripts]
+scanmaker = "scanmaker.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
