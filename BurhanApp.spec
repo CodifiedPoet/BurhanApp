@@ -51,6 +51,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,   # No console window — GUI app
+    icon='assets/BurhanApp.icns' if sys.platform == 'darwin' else 'assets/BurhanApp.ico',
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

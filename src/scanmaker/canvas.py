@@ -3,7 +3,7 @@
 import math
 import sys
 from dataclasses import replace as dc_replace
-from tkinter import Canvas, Scrollbar, simpledialog
+from tkinter import Canvas, Scrollbar, messagebox, simpledialog
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageFont, ImageTk
@@ -21,6 +21,7 @@ class AnnotationCanvas(ctk.CTkFrame):
         self.annotations: list[Annotation] = []
         self._undo_stack: list[list[Annotation]] = []
         self._redo_stack: list[list[Annotation]] = []
+        self._MAX_UNDO = 50
 
         self.current_effects: set[Tool] = {Tool.HIGHLIGHT}  # toggleable effects
         self.current_shape: Tool | None = None               # exclusive shape or None
@@ -116,6 +117,7 @@ class AnnotationCanvas(ctk.CTkFrame):
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<Double-Button-1>", self._on_double_click)
         self.canvas.bind("<ButtonPress-3>", self._on_right_press)
         self.canvas.bind("<B3-Motion>", self._on_right_drag)
         self.canvas.bind("<ButtonRelease-3>", self._on_right_release)
@@ -190,23 +192,33 @@ class AnnotationCanvas(ctk.CTkFrame):
         self._cache_dirty = True
         self._refresh()
 
+    def _push_undo(self):
+        """Save current annotations to undo stack (bounded)."""
+        self._undo_stack.append(list(self.annotations))
+        self._redo_stack.clear()
+        if len(self._undo_stack) > self._MAX_UNDO:
+            self._undo_stack.pop(0)
+
     def undo(self):
         if self._undo_stack:
             self._redo_stack.append(list(self.annotations))
+            if len(self._redo_stack) > self._MAX_UNDO:
+                self._redo_stack.pop(0)
             self.annotations = self._undo_stack.pop()
             self._invalidate()
 
     def redo(self):
         if self._redo_stack:
             self._undo_stack.append(list(self.annotations))
+            if len(self._undo_stack) > self._MAX_UNDO:
+                self._undo_stack.pop(0)
             self.annotations = self._redo_stack.pop()
             self._invalidate()
 
     def clear_all(self):
         self._dismiss_text_editor()
         if self.annotations:
-            self._undo_stack.append(list(self.annotations))
-            self._redo_stack.clear()
+            self._push_undo()
             self.annotations.clear()
             self._invalidate()
 
@@ -244,6 +256,7 @@ class AnnotationCanvas(ctk.CTkFrame):
         dw = max(1, int(rc.width * self.scale))
         dh = max(1, int(rc.height * self.scale))
         display = rc.convert("RGB").resize((dw, dh), Image.BILINEAR)
+        self._display_pil = display  # prevent GC while PhotoImage references it
         self._photo = ImageTk.PhotoImage(display)
 
         cw = self.canvas.winfo_width() or dw
@@ -717,13 +730,16 @@ class AnnotationCanvas(ctk.CTkFrame):
             self._start_marching()
 
     def _on_delete_key(self, e):
-        """Delete the currently selected annotation."""
+        """Delete the currently selected annotation after confirmation."""
         idx = self._selected_annotation_idx
         if idx is None or idx >= len(self.annotations):
             return
+        ann = self.annotations[idx]
+        kind = "text box" if Tool.TEXT in ann.tools else "image" if Tool.IMAGE in ann.tools else "annotation"
+        if not messagebox.askyesno("Delete", f"Delete this {kind}?", parent=self.winfo_toplevel()):
+            return
         self._stop_marching()
-        self._undo_stack.append(list(self.annotations))
-        self._redo_stack.clear()
+        self._push_undo()
         self.annotations.pop(idx)
         self._selected_annotation_idx = None
         self._invalidate()
@@ -774,11 +790,11 @@ class AnnotationCanvas(ctk.CTkFrame):
             self._drag_start = self._to_img(e.x, e.y)
             self.select_annotation(None)
             return
-        # Click to select / deselect an image annotation
+        # Click to select / deselect any text or image annotation
         click_img = self._to_img(e.x, e.y)
-        img_idx = self._find_image_annotation_at(*click_img)
-        if img_idx is not None and self.current_shape != Tool.TEXT:
-            self.select_annotation(img_idx)
+        ann_idx = self._find_movable_annotation_at(*click_img)
+        if ann_idx is not None:
+            self.select_annotation(ann_idx)
             self._drag_start = None
             return
         # Clicked elsewhere — deselect
@@ -788,6 +804,16 @@ class AnnotationCanvas(ctk.CTkFrame):
             self._drag_start = self._to_img(e.x, e.y)
             return
         self._drag_start = self._to_img(e.x, e.y)
+
+    def _on_double_click(self, e):
+        """Double-click to open a text annotation for editing."""
+        if not self.base_image:
+            return
+        click_img = self._to_img(e.x, e.y)
+        idx = self._find_text_annotation_at(*click_img)
+        if idx is not None:
+            self.select_annotation(None)
+            self._open_text_annotation_for_editing(idx)
 
     def _find_text_annotation_at(self, ix, iy):
         """Return the index of the top-most TEXT annotation whose box contains (ix, iy), or None."""
@@ -872,8 +898,7 @@ class AnnotationCanvas(ctk.CTkFrame):
             a = self.annotations[idx]
             self._moving_annotation_idx = idx
             self._move_start_img = (ix, iy)
-            self._undo_stack.append(list(self.annotations))
-            self._redo_stack.clear()
+            self._push_undo()
             # Check for resize handle (IMAGE annotations only)
             if Tool.IMAGE in a.tools:
                 handle = self._hit_test_handle(a, ix, iy)
@@ -926,10 +951,22 @@ class AnnotationCanvas(ctk.CTkFrame):
                 a, x1=nx1, y1=ny1, x2=nx2, y2=ny2,
             )
         else:
-            # Move: translate
+            # Move: translate, clamped to image bounds
             dx, dy = ix - sx, iy - sy
+            new_x1, new_y1 = a.x1 + dx, a.y1 + dy
+            new_x2, new_y2 = a.x2 + dx, a.y2 + dy
+            if self.base_image is not None:
+                iw, ih = self.base_image.size
+                if new_x1 < 0:
+                    new_x2 -= new_x1; new_x1 = 0
+                if new_y1 < 0:
+                    new_y2 -= new_y1; new_y1 = 0
+                if new_x2 > iw:
+                    new_x1 -= (new_x2 - iw); new_x2 = iw
+                if new_y2 > ih:
+                    new_y1 -= (new_y2 - ih); new_y2 = ih
             self.annotations[self._moving_annotation_idx] = dc_replace(
-                a, x1=a.x1 + dx, y1=a.y1 + dy, x2=a.x2 + dx, y2=a.y2 + dy,
+                a, x1=new_x1, y1=new_y1, x2=new_x2, y2=new_y2,
             )
         self._move_start_img = (ix, iy)
         self._invalidate()
@@ -1237,8 +1274,7 @@ class AnnotationCanvas(ctk.CTkFrame):
         self._dismiss_text_editor()
         if text and coords:
             x1, y1, x2, y2 = coords
-            self._undo_stack.append(list(self.annotations))
-            self._redo_stack.clear()
+            self._push_undo()
             new_ann = Annotation(
                 tools=frozenset({Tool.TEXT}),
                 x1=x1, y1=y1, x2=x2, y2=y2,
@@ -1261,8 +1297,7 @@ class AnnotationCanvas(ctk.CTkFrame):
             self._invalidate()
         elif not text and editing_idx is not None and 0 <= editing_idx < len(self.annotations):
             # User cleared all text while re-editing — remove the annotation
-            self._undo_stack.append(list(self.annotations))
-            self._redo_stack.clear()
+            self._push_undo()
             del self.annotations[editing_idx]
             self._invalidate()
 
@@ -1423,16 +1458,10 @@ class AnnotationCanvas(ctk.CTkFrame):
         ix, iy = self._to_img(e.x, e.y)
         self._drag_start = None
         if abs(ix - sx) < 3 and abs(iy - sy) < 3:
-            # Tiny drag = click.  Check for click on existing annotation.
-            if self.current_shape == Tool.TEXT:
-                idx = self._find_text_annotation_at(ix, iy)
-                if idx is not None:
-                    self._open_text_annotation_for_editing(idx)
-                    return
-            # Click on an image to select it
-            img_idx = self._find_image_annotation_at(ix, iy)
-            if img_idx is not None:
-                self.select_annotation(img_idx)
+            # Tiny drag = click.  Select any text or image annotation.
+            ann_idx = self._find_movable_annotation_at(ix, iy)
+            if ann_idx is not None:
+                self.select_annotation(ann_idx)
             else:
                 self.select_annotation(None)
             return
@@ -1456,8 +1485,7 @@ class AnnotationCanvas(ctk.CTkFrame):
                     bh = int(bw / ar)
                 ix = sx + (bw if ix >= sx else -bw)
                 iy = sy + (bh if iy >= sy else -bh)
-            self._undo_stack.append(list(self.annotations))
-            self._redo_stack.clear()
+            self._push_undo()
             self.annotations.append(Annotation(
                 tools=frozenset({Tool.IMAGE}),
                 x1=sx, y1=sy, x2=ix, y2=iy,
@@ -1468,8 +1496,7 @@ class AnnotationCanvas(ctk.CTkFrame):
             self.pending_image = None  # consumed — allow clicking to select
             self._invalidate()
             return
-        self._undo_stack.append(list(self.annotations))
-        self._redo_stack.clear()
+        self._push_undo()
         self.annotations.append(Annotation(
             tools=active,
             x1=sx, y1=sy, x2=ix, y2=iy,

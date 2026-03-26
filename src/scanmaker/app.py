@@ -166,6 +166,7 @@ class ScanGeneratorApp(ctk.CTk):
         self.title("BurhanApp  \u2014  \u0642\u064f\u0644\u0652 \u0647\u064e\u0627\u062a\u064f\u0648\u0652 \u0628\u064f\u0631\u0652\u0647\u064e\u0627\u0646\u064e\u0643\u064f\u0645\u0652")
         self.geometry("1280x860")
         self.minsize(1000, 700)
+        self._set_icon()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.configure(fg_color=self.c["bg"])
@@ -179,6 +180,23 @@ class ScanGeneratorApp(ctk.CTk):
 
         self._build_ui()
         self._bind_shortcuts()
+
+    def _set_icon(self):
+        """Set the window/taskbar icon from assets."""
+        try:
+            base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+            if hasattr(sys, '_MEIPASS'):
+                icon_path = os.path.join(base, 'assets', 'BurhanApp.ico')
+            else:
+                icon_path = os.path.join(base, '..', '..', 'assets', 'BurhanApp.ico')
+            icon_path = os.path.normpath(icon_path)
+            if os.path.exists(icon_path):
+                self.iconbitmap(icon_path)
+                ico_img = Image.open(icon_path)
+                self._icon_photo = ImageTk.PhotoImage(ico_img.resize((32, 32), Image.LANCZOS))
+                self.iconphoto(False, self._icon_photo)
+        except Exception:
+            pass
 
     def _tw(self, widget, **mapping):
         """Register *widget* for automatic theme recoloring."""
@@ -308,6 +326,14 @@ class ScanGeneratorApp(ctk.CTk):
         right = ctk.CTkFrame(content, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True)
 
+        # -- FAR RIGHT: Interaction Hints --
+        self._hints_frame = self._tw(
+            ctk.CTkFrame(content, fg_color=c["panel"], corner_radius=10, width=260),
+            fg_color="panel")
+        self._hints_frame.pack(side="right", fill="y", padx=(6, 0))
+        self._hints_frame.pack_propagate(False)
+        self._build_hints_panel(self._hints_frame)
+
         toolbar_frame = self._tw(ctk.CTkFrame(right, fg_color=c["panel"], corner_radius=10), fg_color="panel")
         toolbar_frame.pack(fill="x", pady=(0, 4))
 
@@ -425,6 +451,65 @@ class ScanGeneratorApp(ctk.CTk):
                  fg_color="blue", hover_color="blue_light")
         _preview_btn.pack(side="right", padx=(0, 6))
         _Tooltip(_preview_btn, "Open a preview window showing\nthe final merged result.")
+
+    def _build_hints_panel(self, parent):
+        """Build the interaction hints info panel on the right side."""
+        c = self.c
+
+        self._tw(ctk.CTkLabel(parent, text="\u2139\uFE0F  Quick Guide",
+                              font=ctk.CTkFont(size=16, weight="bold"), text_color=c["gold"]),
+                 text_color="gold").pack(pady=(10, 4))
+        self._tw(ctk.CTkFrame(parent, height=1, fg_color=c["accent"]),
+                 fg_color="accent").pack(fill="x", padx=10, pady=(0, 4))
+
+        scroll = self._tw(
+            ctk.CTkScrollableFrame(parent, fg_color=c["panel"], label_text="",
+                                   scrollbar_button_color=c["scroll_bg"],
+                                   scrollbar_button_hover_color=c["btn_hover"]),
+            fg_color="panel", scrollbar_button_color="scroll_bg",
+            scrollbar_button_hover_color="btn_hover")
+        scroll.pack(fill="both", expand=True, padx=2, pady=(0, 4))
+
+        hints = [
+            ("\U0001F5B1  Select",
+             "Click any text box or image\nto select it (marching border).\nClick empty area to deselect."),
+            ("\u270F\uFE0F  Create Text",
+             "Choose the Text tool, then\ndrag on the canvas to draw a\ntext box. Type and click outside."),
+            ("\U0001F4DD  Edit Text",
+             "Double-click a text box to\nre-open the editor. Change\nfont, size, color, bold/italic."),
+            ("\U0001F5BC  Insert Image",
+             "Click Insert Image \u2014 the image\nis placed at center instantly.\nNo need to draw a box."),
+            ("\u2B05\uFE0F  Move",
+             "Right-click & drag any text\nbox or image to reposition it\nanywhere on the page."),
+            ("\U0001F504  Resize Image",
+             "Right-click drag a handle:\n\u2022 Corners = keep aspect ratio\n\u2022 Edges = stretch freely"),
+            ("\U0001F5D1  Delete",
+             "Select an item, then press\nDelete key or click the \U0001F5D1\nbutton. Confirms before deleting."),
+            ("\U0001F3A8  Effects",
+             "Toggle Highlight, Underline,\nBorder, or Text Lift. Then drag\non the page to apply."),
+            ("\u25B3  Shapes",
+             "Choose Arrow, Rectangle, or\nEllipse. Drag on the canvas to\ndraw the shape."),
+            ("\U0001F50D  Zoom",
+             "Ctrl + Scroll wheel to zoom.\nUse Fit / 1x / 2x buttons or\nthe zoom slider. Plain scroll\nmoves the page up/down."),
+            ("\U0001F4CF  Ruler",
+             "Toggle the ruler to measure\ndistances. Drag on canvas to\ndraw a measurement line.\nScroll wheel on ruler to rotate."),
+            ("\u2328\uFE0F  Shortcuts",
+             "Ctrl+Z \u2192 Undo\nCtrl+Y \u2192 Redo\nEsc      \u2192 Deselect\nDel      \u2192 Delete selected"),
+        ]
+
+        for title, desc in hints:
+            frame = self._tw(ctk.CTkFrame(scroll, fg_color=c["accent"], corner_radius=8),
+                             fg_color="accent")
+            frame.pack(fill="x", padx=4, pady=3)
+            self._tw(ctk.CTkLabel(frame, text=title,
+                                  font=ctk.CTkFont(size=15, weight="bold"),
+                                  text_color=c["text"], anchor="w"),
+                     text_color="text").pack(anchor="w", padx=8, pady=(6, 0))
+            self._tw(ctk.CTkLabel(frame, text=desc,
+                                  font=ctk.CTkFont(size=14),
+                                  text_color=c["text_dim"], anchor="w",
+                                  justify="left"),
+                     text_color="text_dim").pack(anchor="w", padx=8, pady=(2, 6))
 
     def _build_toolbar(self, parent):
         c = self.c
@@ -836,7 +921,10 @@ class ScanGeneratorApp(ctk.CTk):
         self._refresh_tool_buttons()
 
     def _activate_image_tool(self):
-        """Open a file dialog to pick an image, then activate the Image tool."""
+        """Open a file dialog to pick an image, then place it on the canvas."""
+        if not self.editor.base_image:
+            messagebox.showwarning("No Page", "Load a PDF page first.")
+            return
         path = filedialog.askopenfilename(
             title="Select Image",
             filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tiff")])
@@ -844,15 +932,39 @@ class ScanGeneratorApp(ctk.CTk):
             return
         try:
             img = Image.open(path)
-            self.editor.pending_image = img
+            # Place image at center of the visible canvas area, sized to ~30% of page
+            page_w, page_h = self.editor.base_image.size
+            iw, ih = img.size
+            ar = iw / ih if ih > 0 else 1.0
+            # Target: 30% of page width, maintain aspect ratio
+            target_w = int(page_w * 0.3)
+            target_h = int(target_w / ar) if ar > 0 else target_w
+            # Cap at 60% of page height
+            if target_h > int(page_h * 0.6):
+                target_h = int(page_h * 0.6)
+                target_w = int(target_h * ar)
+            cx, cy = page_w // 2, page_h // 2
+            x1, y1 = cx - target_w // 2, cy - target_h // 2
+            x2, y2 = x1 + target_w, y1 + target_h
+            self.editor._push_undo()
+            ann = Annotation(
+                tools=frozenset({Tool.IMAGE}),
+                x1=x1, y1=y1, x2=x2, y2=y2,
+                color=(0, 0, 0),
+                opacity=1.0,
+                image_data=img.copy(),
+            )
+            self.editor.annotations.append(ann)
+            self.editor.pending_image = None
             self.editor.current_shape = Tool.IMAGE
-            # Default image overlay to 100% opacity
             self.opacity_var.set(1.0)
             self._sync_editor()
             self._exit_measure_mode()
             self._refresh_tool_buttons()
+            self.editor._invalidate()
+            # Auto-select the newly placed image
+            self.editor.select_annotation(len(self.editor.annotations) - 1)
         except Exception as e:
-            from tkinter import messagebox
             messagebox.showerror("Error", f"Could not load image:\n{e}")
 
     def _delete_selected(self):
@@ -1351,6 +1463,7 @@ class ScanGeneratorApp(ctk.CTk):
 
         pv_scale = [1.0]
         pv_photo = [None]
+        pv_resized = [None]
 
         canvas = Canvas(win, bg=c["canvas_bg"], highlightthickness=0)
         vs = Scrollbar(win, orient="vertical", command=canvas.yview)
@@ -1368,6 +1481,7 @@ class ScanGeneratorApp(ctk.CTk):
             h = max(1, int(merged.height * s))
             resized = merged.resize((w, h), Image.BILINEAR)
             pv_photo[0] = ImageTk.PhotoImage(resized)
+            pv_resized[0] = resized  # prevent GC while PhotoImage references it
             canvas.delete("all")
             canvas.create_image(0, 0, anchor="nw", image=pv_photo[0])
             canvas.configure(scrollregion=(0, 0, w, h))

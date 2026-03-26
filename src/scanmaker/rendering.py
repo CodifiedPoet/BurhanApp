@@ -184,17 +184,19 @@ def _render_text_runs(draw, runs, x, y, x2, alpha, fallback_color,
 def pdf_pages_to_images(pdf_path: str, pages: list[int], dpi: int = 300) -> list[Image.Image]:
     local = get_local_pdf_path(pdf_path)
     doc = fitz.open(local)
-    zoom = dpi / 72
-    mat = fitz.Matrix(zoom, zoom)
-    images: list[Image.Image] = []
-    for page_num in pages:
-        idx = page_num - 1
-        if idx < 0 or idx >= len(doc):
-            continue
-        pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
-        images.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
-    doc.close()
-    return images
+    try:
+        zoom = dpi / 72
+        mat = fitz.Matrix(zoom, zoom)
+        images: list[Image.Image] = []
+        for page_num in pages:
+            idx = page_num - 1
+            if idx < 0 or idx >= len(doc):
+                continue
+            pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
+            images.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
+        return images
+    finally:
+        doc.close()
 
 
 def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Image.Image:
@@ -213,7 +215,11 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
             draw.line([(ann.x1, ann.y1), shaft_end], fill=c, width=ann.line_width)
             if head_pts:
                 draw.polygon(head_pts, fill=c)
+            old = result
             result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
             continue
 
         if Tool.RECTANGLE in tools:
@@ -224,7 +230,11 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
                 outline=ann.color + (255,),
                 width=ann.line_width,
             )
+            old = result
             result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
             continue
 
         if Tool.ELLIPSE in tools:
@@ -235,7 +245,11 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
                 outline=ann.color + (255,),
                 width=ann.line_width,
             )
+            old = result
             result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
             continue
 
         # --- Image overlay ---
@@ -253,7 +267,12 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
                     img_overlay = Image.merge("RGBA", (r, g, b, a))
                 ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
                 ov.paste(img_overlay, (x1, y1), img_overlay)
+                img_overlay.close()
+                old = result
                 result = Image.alpha_composite(result, ov)
+                ov.close()
+                if old is not result:
+                    old.close()
             continue
 
         # --- Text annotation ---
@@ -279,7 +298,11 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
                     fc = ann.font_color if ann.font_color else ann.color
                     fill = fc + (text_alpha,)
                     draw.multiline_text((x1, y1), ann.text, font=font, fill=fill)
+                old = result
                 result = Image.alpha_composite(result, ov)
+                ov.close()
+                if old is not result:
+                    old.close()
             continue
 
         # --- Composable region effects (Lift / Highlight / Underline / Border) ---
@@ -384,9 +407,12 @@ def apply_watermark(img: Image.Image, text: str, color: tuple, opacity: float = 
     diag = math.hypot(w, h)
     size = max(12, int(diag * 0.25))
     try:
-        font = ImageFont.truetype("arial.ttf", size)
-    except IOError:
-        font = ImageFont.load_default()
+        font = _resolve_font("Arial", size, False, False)
+    except Exception:
+        try:
+            font = ImageFont.truetype("arial.ttf", size)
+        except IOError:
+            font = ImageFont.load_default()
 
     tmp_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     bbox = tmp_draw.textbbox((0, 0), text, font=font)
