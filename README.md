@@ -27,7 +27,7 @@ Download the latest release from the [Releases](../../releases) page — grab th
 
 ### From Source (Windows or macOS)
 ```bash
-git clone https://github.com/YOUR_USERNAME/BurhanApp.git
+git clone https://github.com/babouahm/BurhanApp.git
 cd BurhanApp
 python -m venv .venv
 
