@@ -5,7 +5,7 @@ import sys
 
 from PIL import Image
 
-from PySide6.QtCore import Qt, Slot, QTimer, QRectF, QRect, QSize, QPoint
+from PySide6.QtCore import Qt, Slot, Signal, QTimer, QRectF, QRect, QSize, QPoint
 from PySide6.QtGui import (
     QAction, QIcon, QPixmap, QFont, QColor, QKeySequence,
 )
@@ -25,6 +25,7 @@ from .rendering import (
 )
 from .utils import parse_page_ranges
 from .theme import get_qss, get_palette
+from .updater import check_for_update
 
 # --- Locate bundled data / assets ---
 if getattr(sys, "frozen", False):
@@ -121,6 +122,8 @@ class _FlowLayout(QLayout):
 
 class BurhanApp(QMainWindow):
 
+    _update_available = Signal(str, str)  # tag, url
+
     def __init__(self):
         super().__init__()
         self._theme_name = "dark"
@@ -140,6 +143,8 @@ class BurhanApp(QMainWindow):
         self._build_ui()
         self._apply_theme()
         self._bind_shortcuts()
+        self._update_available.connect(self._show_update_dialog)
+        check_for_update(self._on_update_result)
 
     # ------------------------------------------------------------------
     # Icon
@@ -158,6 +163,25 @@ class BurhanApp(QMainWindow):
         self.setStyleSheet(get_qss(self._theme_name))
         pal = get_palette(self._theme_name)
         self.editor.setStyleSheet(f"background-color: {pal['editor_bg']};")
+
+    def _on_update_result(self, tag, url):
+        """Called from background thread; emit signal to main thread."""
+        if tag and url:
+            self._update_available.emit(tag, url)
+
+    @Slot(str, str)
+    def _show_update_dialog(self, tag, url):
+        import webbrowser
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Update Available")
+        msg.setText(f"A new version <b>{tag}</b> is available!")
+        msg.setInformativeText("Would you like to open the download page?")
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            webbrowser.open(url)
 
     @Slot()
     def _toggle_theme(self):

@@ -15,6 +15,7 @@ a = Analysis(
         'scanmaker.rendering',
         'scanmaker.utils',
         'scanmaker.theme',
+        'scanmaker.updater',
     ],
     hookspath=[],
     hooksconfig={},
