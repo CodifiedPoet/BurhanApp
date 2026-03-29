@@ -1,4 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
+
+is_mac = sys.platform == 'darwin'
 
 a = Analysis(
     ['run_qt.py'],
@@ -37,7 +40,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
-    icon='assets/BurhanApp.ico',
+    icon='assets/BurhanApp.icns' if is_mac else 'assets/BurhanApp.ico',
 )
 
 coll = COLLECT(
@@ -49,3 +52,17 @@ coll = COLLECT(
     upx_exclude=[],
     name='BurhanApp',
 )
+
+if is_mac:
+    app = BUNDLE(
+        coll,
+        name='BurhanApp.app',
+        icon='assets/BurhanApp.icns',
+        bundle_identifier='com.burhanapp.scanmaker',
+        info_plist={
+            'CFBundleShortVersionString': '2.0.0',
+            'CFBundleName': 'BurhanApp',
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '10.15',
+        },
+    )

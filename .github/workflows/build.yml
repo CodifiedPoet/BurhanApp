@@ -62,7 +62,7 @@ jobs:
 
       - name: Zip build (macOS)
         if: runner.os == 'macOS'
-        run: cd dist && zip -r "../${{ matrix.zip_name }}" BurhanApp/
+        run: cd dist && zip -r -y "../${{ matrix.zip_name }}" BurhanApp.app/
 
       - name: Upload to Release
         if: github.event_name == 'release'
