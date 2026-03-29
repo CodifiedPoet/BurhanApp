@@ -1,8 +1,9 @@
 # BurhanApp
 
-A modern PDF annotation and scan-generation tool built with Python, CustomTkinter, and PyMuPDF.
+A modern PDF annotation and scan-generation tool built with Python, PySide6 (Qt6), and PyMuPDF.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.13%2B-blue)
+![Qt](https://img.shields.io/badge/UI-PySide6%20(Qt6)-41cd52)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -10,7 +11,9 @@ A modern PDF annotation and scan-generation tool built with Python, CustomTkinte
 
 - **PDF Viewer** — Load multi-page PDFs and navigate with arrow keys or Page Up/Down
 - **Annotation Tools** — Highlight, underline, border, text lift, arrow, rectangle, ellipse
-- **Image Overlay** — Place images with drag-to-draw, resize (edge or corner), move, and delete
+- **Shape Tools** — Rounded rectangle, diamond, star, callout, bracket `}`, curved arrow, connector, freehand, line
+- **Gradient Fills** — Top-to-bottom gradient fills on shapes
+- **Image Overlay** — Place images as annotations or watermarks, drag-to-draw, resize, move, and delete
 - **Rich Text Annotations** — Drag to create text boxes with per-character bold/italic/color/font formatting
 - **Line Spacing Control** — Adjustable line spacing (1.0x–3.0x) for text annotations
 - **Floating Ruler** — Snip & Sketch–style ruler overlay with rotation (scroll/Shift+scroll)
@@ -18,7 +21,8 @@ A modern PDF annotation and scan-generation tool built with Python, CustomTkinte
 - **Light & Dark Theme** — Toggle between light and dark UI modes
 - **Preview & Export** — Preview rendered output, export pages as PNG/JPEG or merged PDF
 - **Undo/Redo** — Full undo/redo history for all annotations
-- **Cross-platform** — Works on Windows and macOS (keyboard shortcuts, trackpad gestures, font resolution)
+- **Auto-Update Checker** — Notifies you on startup when a new version is available
+- **Cross-platform** — Works on Windows and macOS
 
 ## Download
 
@@ -38,7 +42,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-python run.py
+python run_qt.py
 ```
 
 ## Usage
@@ -85,25 +89,27 @@ The output will be in `dist/BurhanApp/`. Zip the folder for distribution.
 
 ```
 BurhanApp/
-├── run.py                  # Entry point
+├── run_qt.py               # Entry point
 ├── BurhanApp.spec          # PyInstaller build config
 ├── requirements.txt        # Python dependencies
 ├── pyproject.toml          # Package metadata
 ├── assets/                 # Images and resources
 └── src/scanmaker/          # Main package
-    ├── __init__.py
+    ├── __init__.py          # Version constant
     ├── __main__.py          # CLI entry point
-    ├── app.py               # Main application window
-    ├── canvas.py            # Interactive annotation canvas
+    ├── qt_app.py            # Main application window (PySide6)
+    ├── qt_canvas.py         # Interactive annotation canvas (QGraphicsView)
     ├── models.py            # Data models (Tool, Annotation, TextRun)
     ├── rendering.py         # PDF rendering & annotation compositing
+    ├── theme.py             # Dark/light theme stylesheets
+    ├── updater.py           # Auto-update checker (GitHub Releases API)
     └── utils.py             # Utility functions
 ```
 
 ## Requirements
 
-- Python 3.10+
-- customtkinter >= 5.2
+- Python 3.13+
+- PySide6 >= 6.11
 - PyMuPDF >= 1.27
 - Pillow >= 10.0
 
