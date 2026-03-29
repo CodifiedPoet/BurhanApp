@@ -24,3 +24,6 @@ Thumbs.db
 # Build artifacts
 *.exe
 *.zip
+
+# Notes
+FUTURE_IDEAS.md

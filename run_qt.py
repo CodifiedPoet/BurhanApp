@@ -1,9 +1,15 @@
-"""Allow running the package with ``python -m scanmaker``."""
+#!/usr/bin/env python3
+"""Launcher for BurhanApp (PySide6 / Qt6 version)."""
 
 import sys
+import os
+
+# Ensure the src directory is on the path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import qInstallMessageHandler, QtMsgType
-from .qt_app import BurhanApp
+from scanmaker.qt_app import BurhanApp
 
 
 def _qt_message_handler(mode, context, message):
@@ -25,9 +31,6 @@ def main():
     window.show()
     sys.exit(app.exec())
 
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()

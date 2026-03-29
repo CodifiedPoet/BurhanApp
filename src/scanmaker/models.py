@@ -11,9 +11,18 @@ class Tool(Enum):
     UNDERLINE = auto()
     BORDER = auto()
     ARROW = auto()
+    CURVED_ARROW = auto()
     TEXT_LIFT = auto()
     RECTANGLE = auto()
     ELLIPSE = auto()
+    ROUNDED_RECT = auto()
+    LINE = auto()
+    FREEHAND = auto()
+    CALLOUT = auto()
+    BRACKET = auto()
+    STAR = auto()
+    DIAMOND = auto()
+    CONNECTOR = auto()
     IMAGE = auto()
     TEXT = auto()
 
@@ -21,7 +30,10 @@ class Tool(Enum):
 # Effects that can be freely combined on a rectangular region
 EFFECTS = frozenset({Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.BORDER, Tool.TEXT_LIFT})
 # Shapes are exclusive standalone tools
-SHAPES = frozenset({Tool.ARROW, Tool.RECTANGLE, Tool.ELLIPSE})
+SHAPES = frozenset({Tool.ARROW, Tool.CURVED_ARROW, Tool.RECTANGLE, Tool.ELLIPSE,
+                    Tool.ROUNDED_RECT, Tool.LINE, Tool.FREEHAND,
+                    Tool.CALLOUT, Tool.BRACKET, Tool.STAR, Tool.DIAMOND,
+                    Tool.CONNECTOR})
 # Overlay tools that behave like shapes (exclusive, click/drag to place)
 OVERLAYS = frozenset({Tool.IMAGE, Tool.TEXT})
 
@@ -48,6 +60,24 @@ class Annotation:
     opacity: float = 0.4
     line_width: int = 3
     lift_zoom: float = 1.08
+    line_style: str = "solid"       # "solid", "dashed", "dotted"
+    arrow_head: str = "filled"      # "filled", "open", "diamond", "double", "none"
+    curve_offset: float = 0.25     # Bezier bow amount (fraction of line length)
+    # Callout tail anchor (image coords, relative to box)
+    tail_x: int = 0
+    tail_y: int = 0
+    # Bracket style: "curly" or "square"
+    bracket_style: str = "curly"
+    # Star / polygon
+    polygon_sides: int = 5            # number of outer points
+    star_inner_ratio: float = 0.45    # inner radius as fraction of outer
+    # Connector line style: "straight" or "elbow"
+    connector_style: str = "straight"
+    # Gradient fill: "none", "linear", "radial"
+    gradient_type: str = "none"
+    gradient_color2: tuple = (255, 255, 255)  # second gradient stop color
+    # Freehand pen points (list of (x, y) tuples in image coords)
+    points: list = field(default_factory=list)
     # Image overlay fields
     image_data: object = None  # PIL Image (kept as object to avoid circular import)
     # Text annotation fields

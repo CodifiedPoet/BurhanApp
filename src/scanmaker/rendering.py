@@ -1,6 +1,7 @@
 """Rendering — PDF to images, annotation compositing, watermark, merge."""
 
 import math
+from dataclasses import replace as _dc_replace
 
 import fitz  # PyMuPDF
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -199,22 +200,166 @@ def pdf_pages_to_images(pdf_path: str, pages: list[int], dpi: int = 300) -> list
         doc.close()
 
 
+def _bezier_points(x1, y1, x2, y2, offset_frac: float, n_segs: int = 40):
+    """Return list of (x, y) points along a quadratic Bezier curve.
+
+    The control point is placed perpendicular to the midpoint of (x1,y1)-(x2,y2)
+    at a distance of *offset_frac* × line_length.
+    """
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    dx, dy = x2 - x1, y2 - y1
+    length = math.hypot(dx, dy)
+    if length < 1:
+        return [(x1, y1), (x2, y2)]
+    px, py = -dy / length, dx / length  # perpendicular unit
+    off = length * offset_frac
+    cx, cy = mx + px * off, my + py * off
+    pts = []
+    for i in range(n_segs + 1):
+        t = i / n_segs
+        u = 1 - t
+        bx = u * u * x1 + 2 * u * t * cx + t * t * x2
+        by = u * u * y1 + 2 * u * t * cy + t * t * y2
+        pts.append((bx, by))
+    return pts
+
+
+def _make_gradient(w: int, h: int, color1: tuple, color2: tuple,
+                   gtype: str, alpha: int) -> Image.Image:
+    """Create a w×h RGBA gradient image between two RGB colors (pure PIL)."""
+    if w < 1 or h < 1:
+        return Image.new("RGBA", (max(1, w), max(1, h)), color1 + (alpha,))
+    if gtype == "radial":
+        grad = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        cx, cy = w / 2, h / 2
+        max_r = math.hypot(cx, cy)
+        if max_r < 1:
+            max_r = 1
+        # Draw concentric ellipses from outside in
+        draw = ImageDraw.Draw(grad)
+        steps = max(w, h) // 2
+        for i in range(steps, -1, -1):
+            t = i / max(steps, 1)
+            r = int(color1[0] * (1 - t) + color2[0] * t)
+            g = int(color1[1] * (1 - t) + color2[1] * t)
+            b = int(color1[2] * (1 - t) + color2[2] * t)
+            rx = cx * t
+            ry = cy * t
+            if rx < 1 and ry < 1:
+                continue
+            draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry],
+                         fill=(r, g, b, alpha))
+        return grad
+    else:  # linear (top-to-bottom)
+        grad = Image.new("RGBA", (1, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(grad)
+        for y in range(h):
+            t = y / max(h - 1, 1)
+            r = int(color1[0] * (1 - t) + color2[0] * t)
+            g = int(color1[1] * (1 - t) + color2[1] * t)
+            b = int(color1[2] * (1 - t) + color2[2] * t)
+            draw.point((0, y), fill=(r, g, b, alpha))
+        return grad.resize((w, h), Image.NEAREST)
+
+
+def _draw_dashed_line(draw: ImageDraw.Draw, pts: list[tuple], fill, width: int,
+                      style: str = "dashed") -> None:
+    """Draw a dashed or dotted line along a list of (x, y) points."""
+    if style == "solid":
+        draw.line(pts, fill=fill, width=width)
+        return
+    dash = max(8, width * 3) if style == "dashed" else max(2, width)
+    gap = max(6, width * 2)
+    for i in range(len(pts) - 1):
+        x0, y0 = pts[i]
+        x1, y1 = pts[i + 1]
+        dx, dy = x1 - x0, y1 - y0
+        seg_len = math.hypot(dx, dy)
+        if seg_len < 1:
+            continue
+        ux, uy = dx / seg_len, dy / seg_len
+        t = 0.0
+        drawing = True
+        while t < seg_len:
+            step = dash if drawing else gap
+            end_t = min(t + step, seg_len)
+            if drawing:
+                draw.line(
+                    [(x0 + ux * t, y0 + uy * t), (x0 + ux * end_t, y0 + uy * end_t)],
+                    fill=fill, width=width,
+                )
+            t = end_t
+            drawing = not drawing
+
+
+def _draw_diamond_head(draw: ImageDraw.Draw, x1, y1, x2, y2, line_width, fill):
+    """Draw a diamond arrowhead at (x2, y2)."""
+    dx, dy = x2 - x1, y2 - y1
+    length = math.hypot(dx, dy)
+    if length < 1:
+        return (x2, y2)
+    ux, uy = dx / length, dy / length
+    px, py = -uy, ux
+    head_len = max(14, line_width * 4)
+    head_hw = max(6, line_width * 2)
+    mid_x, mid_y = x2 - ux * head_len, y2 - uy * head_len
+    back_x, back_y = x2 - ux * head_len * 2, y2 - uy * head_len * 2
+    polygon = [
+        (x2, y2),
+        (mid_x + px * head_hw, mid_y + py * head_hw),
+        (back_x, back_y),
+        (mid_x - px * head_hw, mid_y - py * head_hw),
+    ]
+    draw.polygon(polygon, fill=fill)
+    return (back_x, back_y)
+
+
 def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Image.Image:
     result = base.convert("RGBA")
     for ann in annotations:
         x1, y1, x2, y2 = norm(ann.x1, ann.y1, ann.x2, ann.y2)
         tools = ann.tools
 
-        # --- Standalone shapes (Arrow / Rectangle / Ellipse) ---
+        # --- Standalone shapes ---
         if Tool.ARROW in tools:
             ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(ov)
             alpha = int(255 * ann.opacity)
             c = ann.color + (alpha,)
-            head_pts, shaft_end = arrowhead(ann.x1, ann.y1, ann.x2, ann.y2, ann.line_width)
-            draw.line([(ann.x1, ann.y1), shaft_end], fill=c, width=ann.line_width)
-            if head_pts:
-                draw.polygon(head_pts, fill=c)
+            head_style = getattr(ann, "arrow_head", "filled")
+            line_style = getattr(ann, "line_style", "solid")
+
+            if head_style == "none":
+                # Plain line with arrowhead style = none
+                _draw_dashed_line(draw, [(ann.x1, ann.y1), (ann.x2, ann.y2)],
+                                  fill=c, width=ann.line_width, style=line_style)
+            elif head_style == "open":
+                head_pts, shaft_end = arrowhead(ann.x1, ann.y1, ann.x2, ann.y2, ann.line_width)
+                _draw_dashed_line(draw, [(ann.x1, ann.y1), shaft_end],
+                                  fill=c, width=ann.line_width, style=line_style)
+                if head_pts:
+                    draw.line(head_pts + [head_pts[0]], fill=c, width=max(2, ann.line_width // 2))
+            elif head_style == "diamond":
+                shaft_end = _draw_diamond_head(draw, ann.x1, ann.y1, ann.x2, ann.y2,
+                                               ann.line_width, c)
+                _draw_dashed_line(draw, [(ann.x1, ann.y1), shaft_end],
+                                  fill=c, width=ann.line_width, style=line_style)
+            elif head_style == "double":
+                head_pts, shaft_end = arrowhead(ann.x1, ann.y1, ann.x2, ann.y2, ann.line_width)
+                tail_pts, tail_end = arrowhead(ann.x2, ann.y2, ann.x1, ann.y1, ann.line_width)
+                _draw_dashed_line(draw, [tail_end, shaft_end],
+                                  fill=c, width=ann.line_width, style=line_style)
+                if head_pts:
+                    draw.polygon(head_pts, fill=c)
+                if tail_pts:
+                    draw.polygon(tail_pts, fill=c)
+            else:  # "filled" (default)
+                head_pts, shaft_end = arrowhead(ann.x1, ann.y1, ann.x2, ann.y2, ann.line_width)
+                _draw_dashed_line(draw, [(ann.x1, ann.y1), shaft_end],
+                                  fill=c, width=ann.line_width, style=line_style)
+                if head_pts:
+                    draw.polygon(head_pts, fill=c)
+
             old = result
             result = Image.alpha_composite(result, ov)
             ov.close()
@@ -222,13 +367,110 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
                 old.close()
             continue
 
+        if Tool.CURVED_ARROW in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(ov)
+            alpha = int(255 * ann.opacity)
+            c = ann.color + (alpha,)
+            head_style = getattr(ann, "arrow_head", "filled")
+            line_style = getattr(ann, "line_style", "solid")
+            offset_frac = getattr(ann, "curve_offset", 0.25)
+            curve_pts = _bezier_points(ann.x1, ann.y1, ann.x2, ann.y2, offset_frac)
+
+            # Arrowhead at the tip — tangent from the last two curve points
+            if head_style != "none" and len(curve_pts) >= 2:
+                tx1, ty1 = curve_pts[-2]
+                tx2, ty2 = curve_pts[-1]
+                head_pts, shaft_end = arrowhead(tx1, ty1, tx2, ty2, ann.line_width)
+                # Trim the curve so it doesn't go through the arrowhead
+                curve_pts[-1] = shaft_end
+            else:
+                head_pts = None
+
+            # Draw curve body
+            _draw_dashed_line(draw, curve_pts, fill=c, width=ann.line_width,
+                              style=line_style)
+
+            # Draw arrowhead
+            if head_pts:
+                if head_style == "open":
+                    draw.line(head_pts + [head_pts[0]], fill=c,
+                              width=max(2, ann.line_width // 2))
+                elif head_style == "diamond":
+                    tx1, ty1 = curve_pts[-2] if len(curve_pts) >= 2 else (ann.x1, ann.y1)
+                    _draw_diamond_head(draw, tx1, ty1, ann.x2, ann.y2,
+                                       ann.line_width, c)
+                else:  # "filled" or "double"
+                    draw.polygon(head_pts, fill=c)
+
+            # Double: arrowhead at tail too
+            if head_style == "double" and len(curve_pts) >= 2:
+                tail_pts, _ = arrowhead(curve_pts[1][0], curve_pts[1][1],
+                                        curve_pts[0][0], curve_pts[0][1],
+                                        ann.line_width)
+                if tail_pts:
+                    draw.polygon(tail_pts, fill=c)
+
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        if Tool.LINE in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(ov)
+            alpha = int(255 * ann.opacity)
+            c = ann.color + (alpha,)
+            line_style = getattr(ann, "line_style", "solid")
+            _draw_dashed_line(draw, [(ann.x1, ann.y1), (ann.x2, ann.y2)],
+                              fill=c, width=ann.line_width, style=line_style)
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        if Tool.FREEHAND in tools:
+            pts = getattr(ann, "points", [])
+            if len(pts) >= 2:
+                ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+                draw = ImageDraw.Draw(ov)
+                alpha = int(255 * ann.opacity)
+                c = ann.color + (alpha,)
+                line_style = getattr(ann, "line_style", "solid")
+                if line_style == "solid":
+                    draw.line(pts, fill=c, width=ann.line_width, joint="curve")
+                else:
+                    _draw_dashed_line(draw, pts, fill=c, width=ann.line_width,
+                                      style=line_style)
+                old = result
+                result = Image.alpha_composite(result, ov)
+                ov.close()
+                if old is not result:
+                    old.close()
+            continue
+
         if Tool.RECTANGLE in tools:
             ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            alpha = int(255 * ann.opacity)
+            gt = getattr(ann, "gradient_type", "none")
+            if gt in ("linear", "radial"):
+                grad = _make_gradient(x2 - x1, y2 - y1, ann.color,
+                                      getattr(ann, "gradient_color2", (255, 255, 255)),
+                                      gt, alpha)
+                ov.paste(grad, (x1, y1))
+                grad.close()
+            else:
+                ImageDraw.Draw(ov).rectangle(
+                    [x1, y1, x2, y2],
+                    fill=ann.color + (alpha,),
+                )
             ImageDraw.Draw(ov).rectangle(
-                [x1, y1, x2, y2],
-                fill=ann.color + (int(255 * ann.opacity),),
-                outline=ann.color + (255,),
-                width=ann.line_width,
+                [x1, y1, x2, y2], fill=None,
+                outline=ann.color + (255,), width=ann.line_width,
             )
             old = result
             result = Image.alpha_composite(result, ov)
@@ -239,11 +481,26 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
 
         if Tool.ELLIPSE in tools:
             ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            alpha = int(255 * ann.opacity)
+            gt = getattr(ann, "gradient_type", "none")
+            if gt in ("linear", "radial"):
+                bw, bh = x2 - x1, y2 - y1
+                grad = _make_gradient(bw, bh, ann.color,
+                                      getattr(ann, "gradient_color2", (255, 255, 255)),
+                                      gt, alpha)
+                mask = Image.new("L", (bw, bh), 0)
+                ImageDraw.Draw(mask).ellipse([0, 0, bw, bh], fill=255)
+                ov.paste(grad, (x1, y1), mask)
+                grad.close()
+                mask.close()
+            else:
+                ImageDraw.Draw(ov).ellipse(
+                    [x1, y1, x2, y2],
+                    fill=ann.color + (alpha,),
+                )
             ImageDraw.Draw(ov).ellipse(
-                [x1, y1, x2, y2],
-                fill=ann.color + (int(255 * ann.opacity),),
-                outline=ann.color + (255,),
-                width=ann.line_width,
+                [x1, y1, x2, y2], fill=None,
+                outline=ann.color + (255,), width=ann.line_width,
             )
             old = result
             result = Image.alpha_composite(result, ov)
@@ -251,6 +508,255 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
             if old is not result:
                 old.close()
             continue
+
+        if Tool.ROUNDED_RECT in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            radius = max(10, min(x2 - x1, y2 - y1) // 4)
+            alpha = int(255 * ann.opacity)
+            gt = getattr(ann, "gradient_type", "none")
+            if gt in ("linear", "radial"):
+                bw, bh = x2 - x1, y2 - y1
+                grad = _make_gradient(bw, bh, ann.color,
+                                      getattr(ann, "gradient_color2", (255, 255, 255)),
+                                      gt, alpha)
+                mask = Image.new("L", (bw, bh), 0)
+                ImageDraw.Draw(mask).rounded_rectangle([0, 0, bw, bh],
+                                                       radius=radius, fill=255)
+                ov.paste(grad, (x1, y1), mask)
+                grad.close()
+                mask.close()
+            else:
+                ImageDraw.Draw(ov).rounded_rectangle(
+                    [x1, y1, x2, y2], radius=radius,
+                    fill=ann.color + (alpha,),
+                )
+            ImageDraw.Draw(ov).rounded_rectangle(
+                [x1, y1, x2, y2], radius=radius, fill=None,
+                outline=ann.color + (255,), width=ann.line_width,
+            )
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        if Tool.CALLOUT in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(ov)
+            alpha = int(255 * ann.opacity)
+            fill_c = ann.color + (alpha,)
+            outline_c = ann.color + (255,)
+            # Box body
+            draw.rounded_rectangle(
+                [x1, y1, x2, y2], radius=max(8, min(x2 - x1, y2 - y1) // 8),
+                fill=fill_c, outline=outline_c, width=ann.line_width,
+            )
+            # Triangular tail
+            tx, ty = getattr(ann, "tail_x", 0), getattr(ann, "tail_y", 0)
+            if tx == 0 and ty == 0:
+                # Default: tail hanging below center
+                tx = (x1 + x2) // 2
+                ty = y2 + (y2 - y1) // 3
+            cx = (x1 + x2) // 2
+            tail_hw = max(8, (x2 - x1) // 8)
+            # Tail base points on the box edge
+            b1 = (max(x1, cx - tail_hw), y2)
+            b2 = (min(x2, cx + tail_hw), y2)
+            draw.polygon([b1, (tx, ty), b2], fill=fill_c, outline=outline_c,
+                         width=ann.line_width)
+            # Cover the seam between box and tail
+            draw.rectangle([b1[0] + 1, y2 - ann.line_width, b2[0] - 1, y2 + 1],
+                           fill=fill_c)
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        if Tool.BRACKET in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(ov)
+            alpha = int(255 * ann.opacity)
+            c = ann.color + (alpha,)
+            style = getattr(ann, "bracket_style", "curly")
+            lw = ann.line_width
+            h = y2 - y1
+            w = x2 - x1
+            vertical = abs(h) >= abs(w)  # orientation heuristic
+            if style == "square":
+                if vertical:
+                    # Square bracket facing right: top hook, vertical bar, bottom hook
+                    hook = max(8, abs(w) // 2, 12)
+                    draw.line([(x1 + hook, y1), (x1, y1), (x1, y2), (x1 + hook, y2)],
+                              fill=c, width=lw, joint="miter")
+                else:
+                    hook = max(8, abs(h) // 2, 12)
+                    draw.line([(x1, y1 + hook), (x1, y1), (x2, y1), (x2, y1 + hook)],
+                              fill=c, width=lw, joint="miter")
+            else:  # curly brace — draw a proper } shape
+                if vertical:
+                    mid_y = (y1 + y2) // 2
+                    bow = max(12, abs(w) // 2, 18)
+                    # } shape: top hook → mid tip → bottom hook
+                    # Use 4 cubic beziers for smooth brace
+                    qtr = (y2 - y1) // 4
+                    pts = []
+                    # Top hook: from (x1, y1) curve right then down
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*x1 + 3*u**2*t*(x1+bow*0.5) + 3*u*t**2*(x1+bow*0.1) + t**3*x1
+                        py = u**3*y1 + 3*u**2*t*y1 + 3*u*t**2*(y1+qtr) + t**3*(mid_y-lw)
+                        pts.append((int(px), int(py)))
+                    # Mid tip: jut out to the right
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*x1 + 3*u**2*t*(x1+bow*0.3) + 3*u*t**2*(x1+bow) + t**3*(x1+bow)
+                        py = u**3*(mid_y-lw) + 3*u**2*t*(mid_y-lw*0.5) + 3*u*t**2*(mid_y) + t**3*mid_y
+                        pts.append((int(px), int(py)))
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*(x1+bow) + 3*u**2*t*(x1+bow) + 3*u*t**2*(x1+bow*0.3) + t**3*x1
+                        py = u**3*mid_y + 3*u**2*t*(mid_y) + 3*u*t**2*(mid_y+lw*0.5) + t**3*(mid_y+lw)
+                        pts.append((int(px), int(py)))
+                    # Bottom hook: from mid down then curve right
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*x1 + 3*u**2*t*(x1+bow*0.1) + 3*u*t**2*(x1+bow*0.5) + t**3*x1
+                        py = u**3*(mid_y+lw) + 3*u**2*t*(y2-qtr) + 3*u*t**2*y2 + t**3*y2
+                        pts.append((int(px), int(py)))
+                    _draw_dashed_line(draw, pts, fill=c, width=lw, style="solid")
+                else:
+                    mid_x = (x1 + x2) // 2
+                    bow = max(12, abs(h) // 2, 18)
+                    qtr = (x2 - x1) // 4
+                    pts = []
+                    # Left hook
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*x1 + 3*u**2*t*x1 + 3*u*t**2*(x1+qtr) + t**3*(mid_x-lw)
+                        py = u**3*y1 + 3*u**2*t*(y1+bow*0.5) + 3*u*t**2*(y1+bow*0.1) + t**3*y1
+                        pts.append((int(px), int(py)))
+                    # Mid tip downward
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*(mid_x-lw) + 3*u**2*t*(mid_x-lw*0.5) + 3*u*t**2*mid_x + t**3*mid_x
+                        py = u**3*y1 + 3*u**2*t*(y1+bow*0.3) + 3*u*t**2*(y1+bow) + t**3*(y1+bow)
+                        pts.append((int(px), int(py)))
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*mid_x + 3*u**2*t*(mid_x) + 3*u*t**2*(mid_x+lw*0.5) + t**3*(mid_x+lw)
+                        py = u**3*(y1+bow) + 3*u**2*t*(y1+bow) + 3*u*t**2*(y1+bow*0.3) + t**3*y1
+                        pts.append((int(px), int(py)))
+                    # Right hook
+                    for t_i in range(21):
+                        t = t_i / 20
+                        u = 1 - t
+                        px = u**3*(mid_x+lw) + 3*u**2*t*(x2-qtr) + 3*u*t**2*x2 + t**3*x2
+                        py = u**3*y1 + 3*u**2*t*(y1+bow*0.1) + 3*u*t**2*(y1+bow*0.5) + t**3*y1
+                        pts.append((int(px), int(py)))
+                    _draw_dashed_line(draw, pts, fill=c, width=lw, style="solid")
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        if Tool.STAR in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(ov)
+            alpha = int(255 * ann.opacity)
+            fill_c = ann.color + (alpha,)
+            outline_c = ann.color + (255,)
+            n = max(3, getattr(ann, "polygon_sides", 5))
+            inner_ratio = max(0.1, min(0.95, getattr(ann, "star_inner_ratio", 0.45)))
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            rx, ry = (x2 - x1) / 2, (y2 - y1) / 2
+            pts = []
+            for i in range(n * 2):
+                angle = math.pi * i / n - math.pi / 2
+                r_frac = 1.0 if i % 2 == 0 else inner_ratio
+                pts.append((cx + rx * r_frac * math.cos(angle),
+                            cy + ry * r_frac * math.sin(angle)))
+            draw.polygon(pts, fill=fill_c, outline=outline_c, width=ann.line_width)
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        if Tool.DIAMOND in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(ov)
+            alpha = int(255 * ann.opacity)
+            fill_c = ann.color + (alpha,)
+            outline_c = ann.color + (255,)
+            gt = getattr(ann, "gradient_type", "none")
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            diamond_pts = [(cx, y1), (x2, cy), (cx, y2), (x1, cy)]
+            if gt in ("linear", "radial"):
+                bw, bh = x2 - x1, y2 - y1
+                grad = _make_gradient(bw, bh, ann.color,
+                                      getattr(ann, "gradient_color2", (255, 255, 255)),
+                                      gt, alpha)
+                mask = Image.new("L", (bw, bh), 0)
+                ImageDraw.Draw(mask).polygon(
+                    [(cx - x1, 0), (bw, cy - y1), (cx - x1, bh), (0, cy - y1)],
+                    fill=255)
+                ov.paste(grad, (x1, y1), mask)
+                grad.close()
+                mask.close()
+            else:
+                draw.polygon(diamond_pts, fill=fill_c)
+            draw.polygon(diamond_pts, fill=None, outline=outline_c,
+                         width=ann.line_width)
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        if Tool.CONNECTOR in tools:
+            ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(ov)
+            alpha = int(255 * ann.opacity)
+            c = ann.color + (alpha,)
+            line_style = getattr(ann, "line_style", "solid")
+            cstyle = getattr(ann, "connector_style", "straight")
+            if cstyle == "elbow":
+                mid_x = ann.x2
+                pts = [(ann.x1, ann.y1), (mid_x, ann.y1), (mid_x, ann.y2)]
+                _draw_dashed_line(draw, pts, fill=c, width=ann.line_width,
+                                  style=line_style)
+            else:
+                _draw_dashed_line(draw, [(ann.x1, ann.y1), (ann.x2, ann.y2)],
+                                  fill=c, width=ann.line_width, style=line_style)
+            # Small dots at endpoints
+            dot_r = max(3, ann.line_width)
+            for dx, dy in [(ann.x1, ann.y1), (ann.x2, ann.y2)]:
+                draw.ellipse([dx - dot_r, dy - dot_r, dx + dot_r, dy + dot_r],
+                             fill=c)
+            old = result
+            result = Image.alpha_composite(result, ov)
+            ov.close()
+            if old is not result:
+                old.close()
+            continue
+
+        # --- Gradient fill support for RECTANGLE / ELLIPSE / ROUNDED_RECT ---
+        # (handled above with plain fill; gradient is applied via
+        #  a separate post-process if gradient_type != "none")
 
         # --- Image overlay ---
         if Tool.IMAGE in tools:
@@ -275,29 +781,49 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
                     old.close()
             continue
 
-        # --- Text annotation ---
+        # --- Text annotation (2x supersampled for crisp text) ---
         if Tool.TEXT in tools:
             if ann.text:
-                ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
-                draw = ImageDraw.Draw(ov)
+                SS = 2  # supersample factor
+                region_w = max(1, x2 - x1)
+                region_h = max(1, y2 - y1)
+                ss_w, ss_h = region_w * SS, region_h * SS
+
+                # Create supersampled region overlay
+                ss_img = Image.new("RGBA", (ss_w, ss_h), (0, 0, 0, 0))
+                ss_draw = ImageDraw.Draw(ss_img)
                 alpha = int(255 * ann.opacity)
-                # Text always renders at full opacity; alpha only applies to background
-                text_alpha = 255 if ann.bg_color is None else alpha
-                # Draw background rectangle if bg_color is set
+                text_alpha = 255  # text is always fully opaque
+
+                # Draw background rectangle at supersampled size
                 if ann.bg_color is not None:
                     bg_fill = ann.bg_color + (alpha,)
-                    draw.rectangle([x1, y1, x2, y2], fill=bg_fill)
-                # Rich text: render each run with its own font
+                    ss_draw.rectangle([0, 0, ss_w, ss_h], fill=bg_fill)
+
+                # Render text at 2x scale
                 if ann.text_runs:
-                    _render_text_runs(draw, ann.text_runs, x1, y1, x2, text_alpha, ann.color,
+                    scaled_runs = [
+                        _dc_replace(run, font_size=run.font_size * SS)
+                        for run in ann.text_runs
+                    ]
+                    _render_text_runs(ss_draw, scaled_runs, 0, 0, ss_w,
+                                      text_alpha, ann.color,
                                       line_spacing=ann.line_spacing)
                 else:
-                    # Fallback: single-format rendering
-                    font = _resolve_font(ann.font_family, ann.font_size,
+                    font = _resolve_font(ann.font_family, ann.font_size * SS,
                                          ann.font_bold, ann.font_italic)
                     fc = ann.font_color if ann.font_color else ann.color
                     fill = fc + (text_alpha,)
-                    draw.multiline_text((x1, y1), ann.text, font=font, fill=fill)
+                    ss_draw.multiline_text((0, 0), ann.text, font=font, fill=fill)
+
+                # Downscale with LANCZOS for smooth antialiasing
+                downscaled = ss_img.resize((region_w, region_h), Image.LANCZOS)
+                ss_img.close()
+
+                # Place into full-size overlay and composite
+                ov = Image.new("RGBA", result.size, (0, 0, 0, 0))
+                ov.paste(downscaled, (x1, y1), downscaled)
+                downscaled.close()
                 old = result
                 result = Image.alpha_composite(result, ov)
                 ov.close()
@@ -400,12 +926,21 @@ def render_annotations(base: Image.Image, annotations: list[Annotation]) -> Imag
     return result
 
 
-def apply_watermark(img: Image.Image, text: str, color: tuple, opacity: float = 0.6) -> Image.Image:
+def apply_watermark(
+    img: Image.Image,
+    text: str,
+    color: tuple,
+    opacity: float = 0.6,
+    position: str = "center",
+    orientation: str = "diagonal",
+    scale_pct: float = 100.0,
+) -> Image.Image:
     if not text:
         return img
     w, h = img.size
+    angle = {"diagonal": 45, "horizontal": 0, "vertical": 90}.get(orientation.lower(), 45)
     diag = math.hypot(w, h)
-    size = max(12, int(diag * 0.25))
+    size = max(12, int(diag * 0.25 * (scale_pct / 100.0)))
     try:
         font = _resolve_font("Arial", size, False, False)
     except Exception:
@@ -414,32 +949,64 @@ def apply_watermark(img: Image.Image, text: str, color: tuple, opacity: float = 
         except IOError:
             font = ImageFont.load_default()
 
+    fill = color + (int(255 * opacity),)
     tmp_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    bbox = tmp_draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    txt_img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-    ImageDraw.Draw(txt_img).text((-bbox[0], -bbox[1]), text, font=font, fill=color + (int(255 * opacity),))
-    rot = txt_img.rotate(45, expand=True)
+
+    def _make_stamp(fnt):
+        bbox = tmp_draw.textbbox((0, 0), text, font=fnt)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        stamp = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+        ImageDraw.Draw(stamp).text((-bbox[0], -bbox[1]), text, font=fnt, fill=fill)
+        return stamp.rotate(angle, expand=True) if angle else stamp
+
+    rot = _make_stamp(font)
     rw, rh = rot.size
-    scale = min(w / rw, h / rh) * 0.9
-    if scale < 1:
-        final = max(10, int(size * scale))
+    fit_scale = min(w / rw, h / rh) * 0.9
+    if fit_scale < 1:
+        final = max(10, int(size * fit_scale))
         try:
             font = ImageFont.truetype("arial.ttf", final)
         except IOError:
             font = ImageFont.load_default()
-        bbox = tmp_draw.textbbox((0, 0), text, font=font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        txt_img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-        ImageDraw.Draw(txt_img).text((-bbox[0], -bbox[1]), text, font=font, fill=color + (int(255 * opacity),))
-        rot = txt_img.rotate(45, expand=True)
+        rot = _make_stamp(font)
         rw, rh = rot.size
+
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    overlay.paste(rot, ((w - rw) // 2, (h - rh) // 2), rot)
+    pos = position.lower()
+    margin = int(min(w, h) * 0.02)
+    if pos == "tiled":
+        gap_x, gap_y = rw + margin * 4, rh + margin * 4
+        for ty in range(-rh, h + rh, gap_y):
+            for tx in range(-rw, w + rw, gap_x):
+                overlay.paste(rot, (tx, ty), rot)
+    else:
+        coords = {
+            "center": ((w - rw) // 2, (h - rh) // 2),
+            "top-left": (margin, margin),
+            "top-center": ((w - rw) // 2, margin),
+            "top-right": (w - rw - margin, margin),
+            "left-center": (margin, (h - rh) // 2),
+            "right-center": (w - rw - margin, (h - rh) // 2),
+            "bottom-left": (margin, h - rh - margin),
+            "bottom-center": ((w - rw) // 2, h - rh - margin),
+            "bottom-right": (w - rw - margin, h - rh - margin),
+        }
+        cx, cy = coords.get(pos, coords["center"])
+        overlay.paste(rot, (cx, cy), rot)
     return Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 
 
-def merge_images(images: list[Image.Image], lang: str, wm_on: bool, wm_text: str, wm_color: tuple) -> Image.Image:
+def merge_images(
+    images: list[Image.Image],
+    lang: str,
+    wm_on: bool,
+    wm_text: str,
+    wm_color: tuple,
+    wm_opacity: float = 0.6,
+    wm_position: str = "center",
+    wm_orientation: str = "diagonal",
+    wm_scale: float = 100.0,
+) -> Image.Image:
     if lang.lower() == "ar":
         images = list(reversed(images))
     total_w = sum(im.width for im in images)
@@ -450,5 +1017,9 @@ def merge_images(images: list[Image.Image], lang: str, wm_on: bool, wm_text: str
         merged.paste(im, (x, 0))
         x += im.width
     if wm_on and wm_text:
-        merged = apply_watermark(merged, wm_text, wm_color)
+        merged = apply_watermark(
+            merged, wm_text, wm_color,
+            opacity=wm_opacity, position=wm_position,
+            orientation=wm_orientation, scale_pct=wm_scale,
+        )
     return merged
