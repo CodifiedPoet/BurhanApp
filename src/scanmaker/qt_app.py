@@ -218,9 +218,11 @@ class BurhanApp(QMainWindow):
         # === HEADER ===
         header = QFrame()
         header.setObjectName("panel")
-        header.setFixedHeight(self._s(60) if self._compact else self._s(90))
+        _hdr_h = self._s(60) if self._compact else self._s(90)
+        header.setFixedHeight(_hdr_h)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 8, 12, 8)
+        _hdr_mv = 4 if self._compact else 8
+        header_layout.setContentsMargins(12, _hdr_mv, 12, _hdr_mv)
         header_layout.addStretch()
         self._banner_label = QLabel()
         self._banner_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -233,14 +235,17 @@ class BurhanApp(QMainWindow):
         self._theme_toggle.setObjectName("theme_toggle")
         self._theme_toggle.setChecked(self._theme_name == "light")
         self._theme_toggle.setToolTip("Toggle light / dark theme")
-        self._theme_toggle.setFixedSize(self._s(56), self._s(30))
+        _toggle_h = min(self._s(30), _hdr_h - 2 * _hdr_mv - 4)
+        self._theme_toggle.setFixedSize(self._s(56), _toggle_h)
         self._theme_toggle.toggled.connect(self._toggle_theme)
 
         theme_box = QHBoxLayout()
         theme_box.setContentsMargins(0, 0, 12, 0)
         theme_box.setSpacing(8)
         self._theme_icon = QLabel("\U0001f319" if self._theme_name == "dark" else "\u2600\ufe0f")
-        self._theme_icon.setStyleSheet("font-size: 16px; background: transparent;")
+        _icon_sz = _toggle_h
+        self._theme_icon.setFixedSize(_icon_sz, _icon_sz)
+        self._theme_icon.setStyleSheet(f"font-size: {max(10, _icon_sz - 6)}px; background: transparent;")
         theme_box.addWidget(self._theme_icon)
         theme_box.addWidget(self._theme_toggle)
         header_layout.addLayout(theme_box)
@@ -317,9 +322,11 @@ class BurhanApp(QMainWindow):
         # -- Sidebar (page thumbnails) --
         sidebar_frame = QFrame()
         sidebar_frame.setObjectName("panel")
-        sidebar_frame.setFixedWidth(self._s(120) if self._compact else self._s(160))
+        self._sidebar_width = max(110, self._s(120)) if self._compact else self._s(160)
+        sidebar_frame.setFixedWidth(self._sidebar_width)
         sidebar_layout = QVBoxLayout(sidebar_frame)
-        sidebar_layout.setContentsMargins(8, 8, 8, 8)
+        _sb_m = 4 if self._compact else 8
+        sidebar_layout.setContentsMargins(_sb_m, _sb_m, _sb_m, _sb_m)
         lbl = QLabel("\U0001F4D1  Pages")
         lbl.setObjectName("gold")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1409,8 +1416,11 @@ class BurhanApp(QMainWindow):
         path = BANNER_DARK if self._theme_name == "dark" else BANNER_LIGHT
         if os.path.isfile(path):
             pm = QPixmap(path)
+            _hdr_h = self._s(60) if self._compact else self._s(90)
+            _hdr_mv = 4 if self._compact else 8
+            banner_h = _hdr_h - 2 * _hdr_mv - 4
             self._banner_label.setPixmap(
-                pm.scaledToHeight(self._s(50) if self._compact else self._s(80), Qt.TransformationMode.SmoothTransformation)
+                pm.scaledToHeight(banner_h, Qt.TransformationMode.SmoothTransformation)
             )
 
     # ------------------------------------------------------------------
@@ -1558,9 +1568,12 @@ class BurhanApp(QMainWindow):
         for btn in self.thumb_widgets:
             btn.deleteLater()
         self.thumb_widgets.clear()
+        # Compute thumbnail max width from sidebar (minus margins/padding)
+        _sb_m = 4 if self._compact else 8
+        _tw = max(40, self._sidebar_width - 2 * _sb_m - 12)
         for i, img in enumerate(self.pages):
             thumb = img.copy()
-            thumb.thumbnail((100, self._s(140)))
+            thumb.thumbnail((_tw, self._s(140)))
             pm = _pil_to_qpixmap(thumb)
             btn = QPushButton()
             btn.setObjectName("thumb_btn")
