@@ -12,11 +12,12 @@ _ui_scale: float | None = None
 
 
 def get_ui_scale() -> float:
-    """Return a scale factor (0.7–1.0) based on primary screen height.
+    """Return a scale factor (0.65–1.0) based on primary screen height.
 
     Baseline is 1080px (typical Windows desktop).  Smaller screens
     (e.g. 900px MacBook) get proportionally smaller UI elements.
-    Must be called *after* QApplication is created.
+    On macOS, an extra 10% reduction compensates for larger system
+    font rendering.  Must be called *after* QApplication is created.
     """
     global _ui_scale
     if _ui_scale is not None:
@@ -26,12 +27,27 @@ def get_ui_scale() -> float:
         screen = QApplication.primaryScreen()
         if screen:
             h = screen.availableGeometry().height()
-            _ui_scale = max(0.7, min(1.0, h / 1080))
+            _ui_scale = max(0.65, min(1.0, h / 1080))
+            if sys.platform == "darwin":
+                _ui_scale = max(0.65, _ui_scale * 0.88)
         else:
             _ui_scale = 1.0
     except Exception:
         _ui_scale = 1.0
     return _ui_scale
+
+
+def is_compact_screen() -> bool:
+    """Return True if the screen is too small for a comfortable layout."""
+    try:
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        if screen:
+            g = screen.availableGeometry()
+            return g.height() < 1000 or g.width() < 1400
+    except Exception:
+        pass
+    return sys.platform == "darwin"
 
 
 def parse_page_ranges(text: str) -> list[int]:

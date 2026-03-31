@@ -571,10 +571,22 @@ def _scale_qss(qss: str, scale: float) -> str:
     return re.sub(r'(\d+(?:\.\d+)?)px', _repl, qss)
 
 
-def get_qss(theme_name: str, scale: float = 1.0) -> str:
+_COMPACT_QSS = """
+QToolButton { padding: 3px 6px; font-size: 10px; min-width: 24px; }
+QPushButton { padding: 3px 8px; }
+QPushButton#action_btn { padding: 3px 6px; font-size: 10px; }
+QLabel#group_label { font-size: 8px; }
+QFrame#tool_group { min-height: 28px; margin: 1px; }
+"""
+
+
+def get_qss(theme_name: str, scale: float = 1.0, compact: bool = False) -> str:
     """Return the QSS string for the given theme ('dark' or 'light')."""
     raw = DARK_QSS if theme_name == "dark" else LIGHT_QSS
-    return _scale_qss(raw, scale)
+    result = _scale_qss(raw, scale)
+    if compact:
+        result += _COMPACT_QSS
+    return result
 
 
 def get_palette(theme_name: str) -> dict:

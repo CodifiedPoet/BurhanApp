@@ -23,7 +23,7 @@ from .rendering import (
     pdf_pages_to_images, merge_images, render_annotations,
     _build_font_map, _FONT_MAP,
 )
-from .utils import parse_page_ranges, get_ui_scale
+from .utils import parse_page_ranges, get_ui_scale, is_compact_screen
 from .theme import get_qss, get_palette
 from .updater import check_for_update
 
@@ -128,6 +128,7 @@ class BurhanApp(QMainWindow):
         super().__init__()
         self._theme_name = "dark"
         self._scale = get_ui_scale()
+        self._compact = is_compact_screen()
 
         self.setWindowTitle("BurhanApp  \u2014  \u0642\u064f\u0644\u0652 \u0647\u064e\u0627\u062a\u064f\u0648\u0652 \u0628\u064f\u0631\u0652\u0647\u064e\u0627\u0646\u064e\u0643\u064f\u0645\u0652")
         self.resize(1280, 860)
@@ -165,7 +166,7 @@ class BurhanApp(QMainWindow):
     # ------------------------------------------------------------------
 
     def _apply_theme(self):
-        self.setStyleSheet(get_qss(self._theme_name, self._scale))
+        self.setStyleSheet(get_qss(self._theme_name, self._scale, self._compact))
         pal = get_palette(self._theme_name)
         self.editor.setStyleSheet(f"background-color: {pal['editor_bg']};")
 
@@ -217,7 +218,7 @@ class BurhanApp(QMainWindow):
         # === HEADER ===
         header = QFrame()
         header.setObjectName("panel")
-        header.setFixedHeight(self._s(90))
+        header.setFixedHeight(self._s(60) if self._compact else self._s(90))
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 8, 12, 8)
         header_layout.addStretch()
@@ -316,7 +317,7 @@ class BurhanApp(QMainWindow):
         # -- Sidebar (page thumbnails) --
         sidebar_frame = QFrame()
         sidebar_frame.setObjectName("panel")
-        sidebar_frame.setFixedWidth(self._s(160))
+        sidebar_frame.setFixedWidth(self._s(120) if self._compact else self._s(160))
         sidebar_layout = QVBoxLayout(sidebar_frame)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         lbl = QLabel("\U0001F4D1  Pages")
@@ -385,7 +386,7 @@ class BurhanApp(QMainWindow):
         # -- Hints panel (inside splitter, right side) --
         self._hints_panel = QFrame()
         self._hints_panel.setObjectName("panel")
-        self._hints_panel.setMinimumWidth(self._s(280))
+        self._hints_panel.setMinimumWidth(self._s(220) if self._compact else self._s(280))
         hints_panel_layout = QVBoxLayout(self._hints_panel)
         hints_panel_layout.setContentsMargins(0, 0, 0, 0)
         hints_panel_layout.setSpacing(0)
@@ -493,7 +494,11 @@ class BurhanApp(QMainWindow):
         content.setStretchFactor(0, 0)   # sidebar: fixed
         content.setStretchFactor(1, 1)   # center: stretch
         content.setStretchFactor(2, 0)   # hints: fixed
-        content.setSizes([140, 9999, 280])
+        if self._compact:
+            self._hints_panel.setVisible(False)
+            content.setSizes([120, 9999, 0])
+        else:
+            content.setSizes([140, 9999, 280])
 
         main_layout.addWidget(content, stretch=1)
 
@@ -596,10 +601,10 @@ class BurhanApp(QMainWindow):
             f = QFrame()
             f.setObjectName("tool_group")
             lay = QHBoxLayout(f)
-            _gm = self._s(8)
+            _gm = self._s(4) if self._compact else self._s(8)
             lay.setContentsMargins(_gm, _gm, _gm, _gm)
-            lay.setSpacing(self._s(8))
-            if label:
+            lay.setSpacing(self._s(4) if self._compact else self._s(8))
+            if label and not self._compact:
                 lbl = QLabel(label)
                 lbl.setObjectName("group_label")
                 lay.addWidget(lbl)
@@ -612,16 +617,16 @@ class BurhanApp(QMainWindow):
         policy.setHeightForWidth(True)
         self._toolbar.setSizePolicy(policy)
         outer = QVBoxLayout(self._toolbar)
-        _om = self._s(8)
+        _om = self._s(4) if self._compact else self._s(8)
         outer.setContentsMargins(_om, _om, _om, _om)
-        outer.setSpacing(self._s(4))
+        outer.setSpacing(self._s(2) if self._compact else self._s(4))
 
         # ═══ ROW 1: Drawing tools │ Actions │ Tools (wrapping) ═══
         row1_w = QWidget()
         row1_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row1_policy.setHeightForWidth(True)
         row1_w.setSizePolicy(row1_policy)
-        row1 = _FlowLayout(row1_w, margin=0, h_spacing=self._s(8), v_spacing=self._s(8))
+        row1 = _FlowLayout(row1_w, margin=0, h_spacing=self._s(4) if self._compact else self._s(8), v_spacing=self._s(4) if self._compact else self._s(8))
 
         # --- Effects ---
         ef, el = _group("Effects")
@@ -697,7 +702,7 @@ class BurhanApp(QMainWindow):
         self._hints_btn = QToolButton()
         self._hints_btn.setText("Guide")
         self._hints_btn.setCheckable(True)
-        self._hints_btn.setChecked(True)
+        self._hints_btn.setChecked(not self._compact)
         self._hints_btn.setToolTip("Show / hide Quick Guide")
         self._hints_btn.clicked.connect(self._toggle_hints)
         tl_l.addWidget(self._hints_btn)
@@ -725,7 +730,7 @@ class BurhanApp(QMainWindow):
         row2_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row2_policy.setHeightForWidth(True)
         row2_w.setSizePolicy(row2_policy)
-        row2 = _FlowLayout(row2_w, margin=0, h_spacing=self._s(8), v_spacing=self._s(6))
+        row2 = _FlowLayout(row2_w, margin=0, h_spacing=self._s(4) if self._compact else self._s(8), v_spacing=self._s(4) if self._compact else self._s(6))
 
         # --- Color presets ---
         clr_f, clr_l = _group("Color")
@@ -1405,7 +1410,7 @@ class BurhanApp(QMainWindow):
         if os.path.isfile(path):
             pm = QPixmap(path)
             self._banner_label.setPixmap(
-                pm.scaledToHeight(self._s(80), Qt.TransformationMode.SmoothTransformation)
+                pm.scaledToHeight(self._s(50) if self._compact else self._s(80), Qt.TransformationMode.SmoothTransformation)
             )
 
     # ------------------------------------------------------------------
