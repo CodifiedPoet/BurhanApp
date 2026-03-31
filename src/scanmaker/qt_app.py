@@ -23,7 +23,7 @@ from .rendering import (
     pdf_pages_to_images, merge_images, render_annotations,
     _build_font_map, _FONT_MAP,
 )
-from .utils import parse_page_ranges
+from .utils import parse_page_ranges, get_ui_scale
 from .theme import get_qss, get_palette
 from .updater import check_for_update
 
@@ -127,10 +127,11 @@ class BurhanApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self._theme_name = "dark"
+        self._scale = get_ui_scale()
 
         self.setWindowTitle("BurhanApp  \u2014  \u0642\u064f\u0644\u0652 \u0647\u064e\u0627\u062a\u064f\u0648\u0652 \u0628\u064f\u0631\u0652\u0647\u064e\u0627\u0646\u064e\u0643\u064f\u0645\u0652")
         self.resize(1280, 860)
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(self._s(1000), self._s(700))
         self._set_icon()
 
         # Page data
@@ -155,12 +156,16 @@ class BurhanApp(QMainWindow):
         if os.path.isfile(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
+    def _s(self, px: int) -> int:
+        """Scale a pixel value by the UI scale factor."""
+        return max(1, round(px * self._scale))
+
     # ------------------------------------------------------------------
     # Theme
     # ------------------------------------------------------------------
 
     def _apply_theme(self):
-        self.setStyleSheet(get_qss(self._theme_name))
+        self.setStyleSheet(get_qss(self._theme_name, self._scale))
         pal = get_palette(self._theme_name)
         self.editor.setStyleSheet(f"background-color: {pal['editor_bg']};")
 
@@ -205,13 +210,14 @@ class BurhanApp(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(12, 12, 12, 12)
-        main_layout.setSpacing(8)
+        _m = self._s(12)
+        main_layout.setContentsMargins(_m, _m, _m, _m)
+        main_layout.setSpacing(self._s(8))
 
         # === HEADER ===
         header = QFrame()
         header.setObjectName("panel")
-        header.setFixedHeight(90)
+        header.setFixedHeight(self._s(90))
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 8, 12, 8)
         header_layout.addStretch()
@@ -226,7 +232,7 @@ class BurhanApp(QMainWindow):
         self._theme_toggle.setObjectName("theme_toggle")
         self._theme_toggle.setChecked(self._theme_name == "light")
         self._theme_toggle.setToolTip("Toggle light / dark theme")
-        self._theme_toggle.setFixedSize(56, 30)
+        self._theme_toggle.setFixedSize(self._s(56), self._s(30))
         self._theme_toggle.toggled.connect(self._toggle_theme)
 
         theme_box = QHBoxLayout()
@@ -242,14 +248,15 @@ class BurhanApp(QMainWindow):
         # === INPUT BAR ===
         input_bar = QFrame()
         input_bar.setObjectName("panel")
-        ib_layout = _FlowLayout(input_bar, margin=8, h_spacing=8, v_spacing=8)
+        ib_layout = _FlowLayout(input_bar, margin=self._s(8), h_spacing=self._s(8), v_spacing=self._s(8))
 
         def _ib_group():
             f = QFrame()
             f.setObjectName("tool_group")
             lay = QHBoxLayout(f)
-            lay.setContentsMargins(8, 8, 8, 8)
-            lay.setSpacing(8)
+            _gm = self._s(8)
+            lay.setContentsMargins(_gm, _gm, _gm, _gm)
+            lay.setSpacing(self._s(8))
             return f, lay
 
         # ── PDF file group ──
@@ -257,7 +264,7 @@ class BurhanApp(QMainWindow):
         l_pdf.addWidget(QLabel("\U0001f4c4 PDF:"))
         self.pdf_entry = QLineEdit()
         self.pdf_entry.setPlaceholderText("Select a PDF file...")
-        self.pdf_entry.setMinimumWidth(150)
+        self.pdf_entry.setMinimumWidth(self._s(150))
         l_pdf.addWidget(self.pdf_entry)
         browse_pdf_btn = QPushButton("Browse")
         browse_pdf_btn.clicked.connect(self._browse_pdf)
@@ -265,11 +272,11 @@ class BurhanApp(QMainWindow):
         l_pdf.addWidget(QLabel("Pages:"))
         self.pages_entry = QLineEdit()
         self.pages_entry.setPlaceholderText("e.g. 1-3, 5, 8")
-        self.pages_entry.setFixedWidth(120)
+        self.pages_entry.setFixedWidth(self._s(120))
         l_pdf.addWidget(self.pages_entry)
         l_pdf.addWidget(QLabel("DPI:"))
         self.dpi_entry = QLineEdit("300")
-        self.dpi_entry.setFixedWidth(50)
+        self.dpi_entry.setFixedWidth(self._s(50))
         l_pdf.addWidget(self.dpi_entry)
         load_pdf_btn = QPushButton("\u25b6  Load Pages")
         load_pdf_btn.setObjectName("green")
@@ -281,7 +288,7 @@ class BurhanApp(QMainWindow):
         g_img, l_img = _ib_group()
         l_img.addWidget(QLabel("\U0001f5bc Images:"))
         self._img_label = QLabel("No images selected")
-        self._img_label.setMinimumWidth(120)
+        self._img_label.setMinimumWidth(self._s(120))
         l_img.addWidget(self._img_label)
         browse_img_btn = QPushButton("Browse")
         browse_img_btn.clicked.connect(self._browse_images)
@@ -309,7 +316,7 @@ class BurhanApp(QMainWindow):
         # -- Sidebar (page thumbnails) --
         sidebar_frame = QFrame()
         sidebar_frame.setObjectName("panel")
-        sidebar_frame.setFixedWidth(160)
+        sidebar_frame.setFixedWidth(self._s(160))
         sidebar_layout = QVBoxLayout(sidebar_frame)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         lbl = QLabel("\U0001F4D1  Pages")
@@ -358,7 +365,7 @@ class BurhanApp(QMainWindow):
         # Page nav bar
         nav_bar = QFrame()
         nav_bar.setObjectName("panel")
-        nav_bar.setFixedHeight(42)
+        nav_bar.setFixedHeight(self._s(42))
         nav_layout = QHBoxLayout(nav_bar)
         nav_layout.setContentsMargins(12, 4, 12, 4)
         self._prev_btn = QPushButton("\u25C0  Prev")
@@ -378,7 +385,7 @@ class BurhanApp(QMainWindow):
         # -- Hints panel (inside splitter, right side) --
         self._hints_panel = QFrame()
         self._hints_panel.setObjectName("panel")
-        self._hints_panel.setMinimumWidth(280)
+        self._hints_panel.setMinimumWidth(self._s(280))
         hints_panel_layout = QVBoxLayout(self._hints_panel)
         hints_panel_layout.setContentsMargins(0, 0, 0, 0)
         hints_panel_layout.setSpacing(0)
@@ -386,7 +393,7 @@ class BurhanApp(QMainWindow):
         # Title bar
         _hints_title_bar = QFrame()
         _hints_title_bar.setObjectName("tool_group")
-        _hints_title_bar.setFixedHeight(42)
+        _hints_title_bar.setFixedHeight(self._s(42))
         _htb_layout = QHBoxLayout(_hints_title_bar)
         _htb_layout.setContentsMargins(12, 0, 8, 0)
         _htb_layout.setSpacing(8)
@@ -397,7 +404,7 @@ class BurhanApp(QMainWindow):
         _htb_layout.addWidget(_hints_lbl)
         _htb_layout.addStretch()
         _hints_close = QPushButton("✕")
-        _hints_close.setFixedSize(24, 24)
+        _hints_close.setFixedSize(self._s(24), self._s(24))
         _hints_close.setStyleSheet(
             "QPushButton { background: transparent; border: none; color: #e2e4e9;"
             " font-size: 16px; padding: 0; line-height: 24px; }"
@@ -493,15 +500,16 @@ class BurhanApp(QMainWindow):
         # === EXPORT BAR ===
         export_bar = QFrame()
         export_bar.setObjectName("panel")
-        eb_layout = _FlowLayout(export_bar, margin=8, h_spacing=8, v_spacing=8)
+        eb_layout = _FlowLayout(export_bar, margin=self._s(8), h_spacing=self._s(8), v_spacing=self._s(8))
 
         def _eb_group():
             """Create a grouped container for export bar controls."""
             f = QFrame()
             f.setObjectName("tool_group")
             lay = QHBoxLayout(f)
-            lay.setContentsMargins(8, 8, 8, 8)
-            lay.setSpacing(8)
+            _gm = self._s(8)
+            lay.setContentsMargins(_gm, _gm, _gm, _gm)
+            lay.setSpacing(self._s(8))
             return f, lay
 
         # ── Language group ──
@@ -509,7 +517,7 @@ class BurhanApp(QMainWindow):
         l_lang.addWidget(QLabel("Language:"))
         self._lang_combo = QComboBox()
         self._lang_combo.addItems(["Arabic (RTL)", "English (LTR)"])
-        self._lang_combo.setFixedWidth(150)
+        self._lang_combo.setFixedWidth(self._s(150))
         l_lang.addWidget(self._lang_combo)
         eb_layout.addWidget(g_lang)
 
@@ -519,11 +527,11 @@ class BurhanApp(QMainWindow):
         l_wm.addWidget(self._wm_enabled)
         self._wm_entry = QLineEdit()
         self._wm_entry.setPlaceholderText("watermark text")
-        self._wm_entry.setFixedWidth(120)
+        self._wm_entry.setFixedWidth(self._s(120))
         l_wm.addWidget(self._wm_entry)
         self._wm_color: tuple[int, int, int] = (0, 255, 0)
         self._wm_color_btn = QPushButton("\u25cf")
-        self._wm_color_btn.setFixedSize(32, 32)
+        self._wm_color_btn.setFixedSize(self._s(32), self._s(32))
         self._wm_color_btn.setStyleSheet(
             "background-color: #00ff00; border-radius: 16px; font-size: 16px;"
         )
@@ -535,26 +543,26 @@ class BurhanApp(QMainWindow):
             "Left-Center", "Right-Center",
             "Bottom-Left", "Bottom-Center", "Bottom-Right", "Tiled",
         ])
-        self._wm_pos_combo.setFixedWidth(120)
+        self._wm_pos_combo.setFixedWidth(self._s(120))
         self._wm_pos_combo.setToolTip("Watermark position on the merged image")
         l_wm.addWidget(self._wm_pos_combo)
         self._wm_orient_combo = QComboBox()
         self._wm_orient_combo.addItems(["Diagonal", "Horizontal", "Vertical"])
-        self._wm_orient_combo.setFixedWidth(90)
+        self._wm_orient_combo.setFixedWidth(self._s(90))
         self._wm_orient_combo.setToolTip("Watermark text orientation")
         l_wm.addWidget(self._wm_orient_combo)
         l_wm.addWidget(QLabel("Opacity:"))
         self._wm_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self._wm_opacity_slider.setRange(5, 100)
         self._wm_opacity_slider.setValue(60)
-        self._wm_opacity_slider.setFixedWidth(60)
+        self._wm_opacity_slider.setFixedWidth(self._s(60))
         self._wm_opacity_slider.setToolTip("Watermark opacity")
         l_wm.addWidget(self._wm_opacity_slider)
         l_wm.addWidget(QLabel("Size:"))
         self._wm_size_slider = QSlider(Qt.Orientation.Horizontal)
         self._wm_size_slider.setRange(10, 200)
         self._wm_size_slider.setValue(100)
-        self._wm_size_slider.setFixedWidth(60)
+        self._wm_size_slider.setFixedWidth(self._s(60))
         self._wm_size_slider.setToolTip("Watermark size (10\u2013200%)")
         l_wm.addWidget(self._wm_size_slider)
         eb_layout.addWidget(g_wm)
@@ -564,7 +572,7 @@ class BurhanApp(QMainWindow):
         l_out.addWidget(QLabel("Output:"))
         self._out_entry = QLineEdit()
         self._out_entry.setPlaceholderText("output file path...")
-        self._out_entry.setMinimumWidth(150)
+        self._out_entry.setMinimumWidth(self._s(150))
         l_out.addWidget(self._out_entry)
         browse_out = QPushButton("Browse")
         browse_out.clicked.connect(self._browse_output)
@@ -588,8 +596,9 @@ class BurhanApp(QMainWindow):
             f = QFrame()
             f.setObjectName("tool_group")
             lay = QHBoxLayout(f)
-            lay.setContentsMargins(8, 8, 8, 8)
-            lay.setSpacing(8)
+            _gm = self._s(8)
+            lay.setContentsMargins(_gm, _gm, _gm, _gm)
+            lay.setSpacing(self._s(8))
             if label:
                 lbl = QLabel(label)
                 lbl.setObjectName("group_label")
@@ -603,15 +612,16 @@ class BurhanApp(QMainWindow):
         policy.setHeightForWidth(True)
         self._toolbar.setSizePolicy(policy)
         outer = QVBoxLayout(self._toolbar)
-        outer.setContentsMargins(8, 8, 8, 8)
-        outer.setSpacing(4)
+        _om = self._s(8)
+        outer.setContentsMargins(_om, _om, _om, _om)
+        outer.setSpacing(self._s(4))
 
         # ═══ ROW 1: Drawing tools │ Actions │ Tools (wrapping) ═══
         row1_w = QWidget()
         row1_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row1_policy.setHeightForWidth(True)
         row1_w.setSizePolicy(row1_policy)
-        row1 = _FlowLayout(row1_w, margin=0, h_spacing=8, v_spacing=8)
+        row1 = _FlowLayout(row1_w, margin=0, h_spacing=self._s(8), v_spacing=self._s(8))
 
         # --- Effects ---
         ef, el = _group("Effects")
@@ -715,7 +725,7 @@ class BurhanApp(QMainWindow):
         row2_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row2_policy.setHeightForWidth(True)
         row2_w.setSizePolicy(row2_policy)
-        row2 = _FlowLayout(row2_w, margin=0, h_spacing=8, v_spacing=6)
+        row2 = _FlowLayout(row2_w, margin=0, h_spacing=self._s(8), v_spacing=self._s(6))
 
         # --- Color presets ---
         clr_f, clr_l = _group("Color")
@@ -726,30 +736,30 @@ class BurhanApp(QMainWindow):
         self._color_preset_btns: list[QPushButton] = []
         for rgb in self._color_presets:
             btn = QPushButton()
-            btn.setFixedSize(22, 22)
+            btn.setFixedSize(self._s(22), self._s(22))
             hex_col = "#%02x%02x%02x" % rgb
             btn.setToolTip(hex_col)
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: {hex_col}; "
-                f"border: 2px solid transparent; border-radius: 11px; "
-                f"min-width: 22px; min-height: 22px; "
-                f"max-width: 22px; max-height: 22px; padding: 0; }}"
+                f"border: 2px solid transparent; border-radius: {self._s(11)}px; "
+                f"min-width: {self._s(22)}px; min-height: {self._s(22)}px; "
+                f"max-width: {self._s(22)}px; max-height: {self._s(22)}px; padding: 0; }}"
             )
             btn.clicked.connect(lambda checked, c=rgb: self._set_color(c))
             clr_l.addWidget(btn)
             self._color_preset_btns.append(btn)
         custom_btn = QPushButton("+")
-        custom_btn.setFixedSize(22, 22)
+        custom_btn.setFixedSize(self._s(22), self._s(22))
         custom_btn.setToolTip("Custom color")
         custom_btn.setStyleSheet(
-            "QPushButton { border-radius: 11px; font-size: 13px; "
-            "font-weight: bold; min-width: 22px; min-height: 22px; "
-            "max-width: 22px; max-height: 22px; padding: 0; }"
+            f"QPushButton {{ border-radius: {self._s(11)}px; font-size: {self._s(13)}px; "
+            f"font-weight: bold; min-width: {self._s(22)}px; min-height: {self._s(22)}px; "
+            f"max-width: {self._s(22)}px; max-height: {self._s(22)}px; padding: 0; }}"
         )
         custom_btn.clicked.connect(self._pick_custom_color)
         clr_l.addWidget(custom_btn)
         self._color_indicator = QPushButton()
-        self._color_indicator.setFixedSize(26, 26)
+        self._color_indicator.setFixedSize(self._s(26), self._s(26))
         self._color_indicator.setEnabled(False)
         self._color_indicator.setToolTip("Active color")
         self._update_color_indicator()
@@ -771,7 +781,7 @@ class BurhanApp(QMainWindow):
         self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self._zoom_slider.setRange(10, 300)
         self._zoom_slider.setValue(100)
-        self._zoom_slider.setFixedWidth(80)
+        self._zoom_slider.setFixedWidth(self._s(80))
         self._zoom_slider.setToolTip("Zoom level")
         self._zoom_slider.valueChanged.connect(
             lambda v: self.editor.set_scale(v / 100.0)
@@ -779,7 +789,7 @@ class BurhanApp(QMainWindow):
         zm_l.addWidget(self._zoom_slider)
         self._zoom_label = QLabel("100%")
         self._zoom_label.setObjectName("value_blue")
-        self._zoom_label.setFixedWidth(40)
+        self._zoom_label.setFixedWidth(self._s(40))
         zm_l.addWidget(self._zoom_label)
         row2.addWidget(zm_f)
 
@@ -788,13 +798,13 @@ class BurhanApp(QMainWindow):
         self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(5, 100)
         self._opacity_slider.setValue(int(self.editor.current_opacity * 100))
-        self._opacity_slider.setFixedWidth(90)
+        self._opacity_slider.setFixedWidth(self._s(90))
         self._opacity_slider.setToolTip("Annotation opacity")
         self._opacity_slider.valueChanged.connect(self._sync_editor)
         op_l.addWidget(self._opacity_slider)
         self._opacity_label = QLabel(f"{int(self.editor.current_opacity * 100)}%")
         self._opacity_label.setObjectName("value_gold")
-        self._opacity_label.setFixedWidth(34)
+        self._opacity_label.setFixedWidth(self._s(34))
         op_l.addWidget(self._opacity_label)
         row2.addWidget(op_f)
 
@@ -803,13 +813,13 @@ class BurhanApp(QMainWindow):
         self._width_slider = QSlider(Qt.Orientation.Horizontal)
         self._width_slider.setRange(1, 25)
         self._width_slider.setValue(self.editor.current_width)
-        self._width_slider.setFixedWidth(90)
+        self._width_slider.setFixedWidth(self._s(90))
         self._width_slider.setToolTip("Stroke width")
         self._width_slider.valueChanged.connect(self._sync_editor)
         wd_l.addWidget(self._width_slider)
         self._width_label = QLabel(f"{self.editor.current_width}px")
         self._width_label.setObjectName("value_blue")
-        self._width_label.setFixedWidth(34)
+        self._width_label.setFixedWidth(self._s(34))
         wd_l.addWidget(self._width_label)
         row2.addWidget(wd_f)
 
@@ -818,7 +828,7 @@ class BurhanApp(QMainWindow):
         ls_f = self._stroke_frame
         self._line_style_combo = QComboBox()
         self._line_style_combo.addItems(["solid", "dashed", "dotted"])
-        self._line_style_combo.setFixedWidth(85)
+        self._line_style_combo.setFixedWidth(self._s(85))
         self._line_style_combo.setToolTip("Line/stroke style")
         self._line_style_combo.currentTextChanged.connect(self._sync_editor)
         ls_l.addWidget(self._line_style_combo)
@@ -829,7 +839,7 @@ class BurhanApp(QMainWindow):
         ah_f = self._arrow_head_frame
         self._arrow_head_combo = QComboBox()
         self._arrow_head_combo.addItems(["filled", "open", "diamond", "double", "none"])
-        self._arrow_head_combo.setFixedWidth(90)
+        self._arrow_head_combo.setFixedWidth(self._s(90))
         self._arrow_head_combo.setToolTip("Arrow head style")
         self._arrow_head_combo.currentTextChanged.connect(self._sync_editor)
         ah_l.addWidget(self._arrow_head_combo)
@@ -841,13 +851,13 @@ class BurhanApp(QMainWindow):
         self._curve_slider = QSlider(Qt.Orientation.Horizontal)
         self._curve_slider.setRange(-50, 50)
         self._curve_slider.setValue(25)
-        self._curve_slider.setFixedWidth(80)
+        self._curve_slider.setFixedWidth(self._s(80))
         self._curve_slider.setToolTip("Curved arrow bend amount (0 = straight)")
         self._curve_slider.valueChanged.connect(self._sync_editor)
         cv_l.addWidget(self._curve_slider)
         self._curve_label = QLabel("25%")
         self._curve_label.setObjectName("value_gold")
-        self._curve_label.setFixedWidth(34)
+        self._curve_label.setFixedWidth(self._s(34))
         cv_l.addWidget(self._curve_label)
         row2.addWidget(cv_f)
 
@@ -856,7 +866,7 @@ class BurhanApp(QMainWindow):
         bk_f = self._bracket_frame
         self._bracket_combo = QComboBox()
         self._bracket_combo.addItems(["curly", "square"])
-        self._bracket_combo.setFixedWidth(75)
+        self._bracket_combo.setFixedWidth(self._s(75))
         self._bracket_combo.setToolTip("Bracket style")
         self._bracket_combo.currentTextChanged.connect(self._sync_editor)
         bk_l.addWidget(self._bracket_combo)
@@ -869,25 +879,25 @@ class BurhanApp(QMainWindow):
         self._star_points_slider = QSlider(Qt.Orientation.Horizontal)
         self._star_points_slider.setRange(3, 12)
         self._star_points_slider.setValue(5)
-        self._star_points_slider.setFixedWidth(60)
+        self._star_points_slider.setFixedWidth(self._s(60))
         self._star_points_slider.setToolTip("Number of star/polygon points")
         self._star_points_slider.valueChanged.connect(self._sync_editor)
         st_l.addWidget(self._star_points_slider)
         self._star_pts_label = QLabel("5")
         self._star_pts_label.setObjectName("value_blue")
-        self._star_pts_label.setFixedWidth(20)
+        self._star_pts_label.setFixedWidth(self._s(20))
         st_l.addWidget(self._star_pts_label)
         st_l.addWidget(QLabel("In"))
         self._star_inner_slider = QSlider(Qt.Orientation.Horizontal)
         self._star_inner_slider.setRange(10, 95)
         self._star_inner_slider.setValue(45)
-        self._star_inner_slider.setFixedWidth(60)
+        self._star_inner_slider.setFixedWidth(self._s(60))
         self._star_inner_slider.setToolTip("Star inner radius ratio (higher = less pointy)")
         self._star_inner_slider.valueChanged.connect(self._sync_editor)
         st_l.addWidget(self._star_inner_slider)
         self._star_inner_label = QLabel("45%")
         self._star_inner_label.setObjectName("value_gold")
-        self._star_inner_label.setFixedWidth(30)
+        self._star_inner_label.setFixedWidth(self._s(30))
         st_l.addWidget(self._star_inner_label)
         row2.addWidget(st_f)
 
@@ -896,7 +906,7 @@ class BurhanApp(QMainWindow):
         cn_f = self._connector_frame
         self._connector_combo = QComboBox()
         self._connector_combo.addItems(["straight", "elbow"])
-        self._connector_combo.setFixedWidth(80)
+        self._connector_combo.setFixedWidth(self._s(80))
         self._connector_combo.setToolTip("Connector line routing")
         self._connector_combo.currentTextChanged.connect(self._sync_editor)
         cn_l.addWidget(self._connector_combo)
@@ -907,17 +917,17 @@ class BurhanApp(QMainWindow):
         gd_f = self._gradient_frame
         self._gradient_combo = QComboBox()
         self._gradient_combo.addItems(["none", "linear", "radial"])
-        self._gradient_combo.setFixedWidth(75)
+        self._gradient_combo.setFixedWidth(self._s(75))
         self._gradient_combo.setToolTip("Fill gradient for shapes")
         self._gradient_combo.currentTextChanged.connect(self._sync_editor)
         gd_l.addWidget(self._gradient_combo)
         self._gradient_color2_btn = QPushButton()
-        self._gradient_color2_btn.setFixedSize(22, 22)
+        self._gradient_color2_btn.setFixedSize(self._s(22), self._s(22))
         self._gradient_color2_btn.setToolTip("2nd gradient color")
         self._gradient_color2_btn.setStyleSheet(
-            "QPushButton { background-color: #ffffff; border: 2px solid #888; "
-            "border-radius: 11px; min-width: 22px; min-height: 22px; "
-            "max-width: 22px; max-height: 22px; padding: 0; }"
+            f"QPushButton {{ background-color: #ffffff; border: 2px solid #888; "
+            f"border-radius: {self._s(11)}px; min-width: {self._s(22)}px; min-height: {self._s(22)}px; "
+            f"max-width: {self._s(22)}px; max-height: {self._s(22)}px; padding: 0; }}"
         )
         self._gradient_color2_btn.clicked.connect(self._pick_gradient_color2)
         gd_l.addWidget(self._gradient_color2_btn)
@@ -929,7 +939,7 @@ class BurhanApp(QMainWindow):
         self._lift_slider = QSlider(Qt.Orientation.Horizontal)
         self._lift_slider.setRange(100, 150)
         self._lift_slider.setValue(int(self.editor.current_lift_zoom * 100))
-        self._lift_slider.setFixedWidth(90)
+        self._lift_slider.setFixedWidth(self._s(90))
         self._lift_slider.setToolTip("Text lift zoom factor")
         self._lift_slider.valueChanged.connect(self._sync_editor)
         lf_l.addWidget(self._lift_slider)
@@ -937,7 +947,7 @@ class BurhanApp(QMainWindow):
             f"+{int((self.editor.current_lift_zoom - 1) * 100)}%"
         )
         self._lift_label.setObjectName("value_gold")
-        self._lift_label.setFixedWidth(34)
+        self._lift_label.setFixedWidth(self._s(34))
         lf_l.addWidget(self._lift_label)
         row2.addWidget(lf_f)
 
@@ -947,13 +957,14 @@ class BurhanApp(QMainWindow):
         self._text_toolbar = QFrame()
         self._text_toolbar.setObjectName("toolbar_row")
         row3 = QHBoxLayout(self._text_toolbar)
-        row3.setContentsMargins(8, 8, 8, 8)
-        row3.setSpacing(8)
+        _r3m = self._s(8)
+        row3.setContentsMargins(_r3m, _r3m, _r3m, _r3m)
+        row3.setSpacing(self._s(8))
 
         fn_f, fn_l = _group("Font")
         self._font_combo = QComboBox()
         self._font_combo.addItems(self._get_installed_fonts())
-        self._font_combo.setFixedWidth(160)
+        self._font_combo.setFixedWidth(self._s(160))
         self._font_combo.setCurrentText("Arial")
         self._font_combo.setToolTip("Font family")
         self._font_combo.currentTextChanged.connect(lambda v: self._sync_text_format())
@@ -964,13 +975,13 @@ class BurhanApp(QMainWindow):
         self._font_size_slider = QSlider(Qt.Orientation.Horizontal)
         self._font_size_slider.setRange(8, 120)
         self._font_size_slider.setValue(24)
-        self._font_size_slider.setFixedWidth(80)
+        self._font_size_slider.setFixedWidth(self._s(80))
         self._font_size_slider.setToolTip("Font size")
         self._font_size_slider.valueChanged.connect(lambda v: self._sync_text_format())
         sz_l.addWidget(self._font_size_slider)
         self._font_size_label = QLabel("24pt")
         self._font_size_label.setObjectName("value_blue")
-        self._font_size_label.setFixedWidth(36)
+        self._font_size_label.setFixedWidth(self._s(36))
         sz_l.addWidget(self._font_size_label)
         row3.addWidget(sz_f)
 
@@ -996,7 +1007,7 @@ class BurhanApp(QMainWindow):
         fc_f, fc_l = _group("Colors")
         self._font_color: tuple[int, int, int] = (0, 0, 0)
         self._font_color_btn = QPushButton("A")
-        self._font_color_btn.setFixedSize(28, 28)
+        self._font_color_btn.setFixedSize(self._s(28), self._s(28))
         self._font_color_btn.setToolTip("Font color")
         self._font_color_btn.setStyleSheet(
             "QPushButton { background-color: #000; color: white; "
@@ -1006,7 +1017,7 @@ class BurhanApp(QMainWindow):
         fc_l.addWidget(self._font_color_btn)
         self._text_bg_color: tuple[int, int, int] | None = (255, 255, 255)
         self._text_bg_btn = QPushButton()
-        self._text_bg_btn.setFixedSize(28, 28)
+        self._text_bg_btn.setFixedSize(self._s(28), self._s(28))
         self._text_bg_btn.setToolTip("Text background")
         self._text_bg_btn.setStyleSheet(
             "QPushButton { background-color: #fff; border: 1px solid #888; "
@@ -1026,7 +1037,7 @@ class BurhanApp(QMainWindow):
         self._line_spacing_slider = QSlider(Qt.Orientation.Horizontal)
         self._line_spacing_slider.setRange(10, 30)
         self._line_spacing_slider.setValue(12)
-        self._line_spacing_slider.setFixedWidth(60)
+        self._line_spacing_slider.setFixedWidth(self._s(60))
         self._line_spacing_slider.setToolTip("Line spacing")
         self._line_spacing_slider.valueChanged.connect(
             lambda v: self._sync_text_format()
@@ -1034,7 +1045,7 @@ class BurhanApp(QMainWindow):
         sp_l.addWidget(self._line_spacing_slider)
         self._line_spacing_label = QLabel("1.2x")
         self._line_spacing_label.setObjectName("value_gold")
-        self._line_spacing_label.setFixedWidth(30)
+        self._line_spacing_label.setFixedWidth(self._s(30))
         sp_l.addWidget(self._line_spacing_label)
         row3.addWidget(sp_f)
         row3.addStretch()
@@ -1333,10 +1344,12 @@ class BurhanApp(QMainWindow):
     def _update_color_indicator(self) -> None:
         """Update the circular indicator that shows the active color."""
         hex_col = "#%02x%02x%02x" % self.editor.current_color
+        r = self._s(13)
+        sz = self._s(26)
         self._color_indicator.setStyleSheet(
             f"QPushButton {{ background-color: {hex_col}; border: 2px solid #888; "
-            f"border-radius: 13px; min-width: 26px; min-height: 26px; "
-            f"max-width: 26px; max-height: 26px; padding: 0; }}"
+            f"border-radius: {r}px; min-width: {sz}px; min-height: {sz}px; "
+            f"max-width: {sz}px; max-height: {sz}px; padding: 0; }}"
         )
 
     @Slot()
@@ -1392,7 +1405,7 @@ class BurhanApp(QMainWindow):
         if os.path.isfile(path):
             pm = QPixmap(path)
             self._banner_label.setPixmap(
-                pm.scaledToHeight(80, Qt.TransformationMode.SmoothTransformation)
+                pm.scaledToHeight(self._s(80), Qt.TransformationMode.SmoothTransformation)
             )
 
     # ------------------------------------------------------------------
@@ -1542,13 +1555,13 @@ class BurhanApp(QMainWindow):
         self.thumb_widgets.clear()
         for i, img in enumerate(self.pages):
             thumb = img.copy()
-            thumb.thumbnail((100, 140))
+            thumb.thumbnail((100, self._s(140)))
             pm = _pil_to_qpixmap(thumb)
             btn = QPushButton()
             btn.setObjectName("thumb_btn")
             btn.setIcon(QIcon(pm))
             btn.setIconSize(pm.size())
-            btn.setFixedHeight(min(140, pm.height() + 10))
+            btn.setFixedHeight(min(self._s(140), pm.height() + self._s(10)))
             btn.clicked.connect(lambda checked, idx=i: self._select_page(idx))
             self._sidebar_layout.addWidget(btn)
             self.thumb_widgets.append(btn)
@@ -1644,7 +1657,7 @@ class BurhanApp(QMainWindow):
         # Top bar
         bar = QFrame()
         bar.setObjectName("panel")
-        bar.setFixedHeight(44)
+        bar.setFixedHeight(self._s(44))
         bar_layout = QHBoxLayout(bar)
         bar_layout.setContentsMargins(12, 4, 12, 4)
         title_lbl = QLabel("\U0001F50D  Scan Preview")
@@ -1663,7 +1676,7 @@ class BurhanApp(QMainWindow):
         scene.addItem(pix_item)
 
         pv_label = QLabel("100%")
-        pv_label.setFixedWidth(50)
+        pv_label.setFixedWidth(self._s(50))
         pv_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
 
         def _show(scale: float | None = None):

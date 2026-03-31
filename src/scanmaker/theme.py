@@ -1,5 +1,7 @@
 """Theme definitions for BurhanApp — dark & light QSS stylesheets + palette constants."""
 
+import re
+
 # ── Palette constants (used by code outside QSS) ─────────────────────
 
 DARK_PALETTE = {
@@ -560,9 +562,19 @@ QFrame#toolbar_row {
 """
 
 
-def get_qss(theme_name: str) -> str:
+def _scale_qss(qss: str, scale: float) -> str:
+    """Scale all ``NNpx`` values in *qss* by *scale*."""
+    if scale >= 0.99:
+        return qss
+    def _repl(m):
+        return f"{max(1, round(float(m.group(1)) * scale))}px"
+    return re.sub(r'(\d+(?:\.\d+)?)px', _repl, qss)
+
+
+def get_qss(theme_name: str, scale: float = 1.0) -> str:
     """Return the QSS string for the given theme ('dark' or 'light')."""
-    return DARK_QSS if theme_name == "dark" else LIGHT_QSS
+    raw = DARK_QSS if theme_name == "dark" else LIGHT_QSS
+    return _scale_qss(raw, scale)
 
 
 def get_palette(theme_name: str) -> dict:

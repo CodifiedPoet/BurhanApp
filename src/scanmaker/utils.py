@@ -1,8 +1,37 @@
-"""Helper utilities — page parsing, path resolution, geometry."""
+"""Helper utilities — page parsing, path resolution, geometry, UI scaling."""
 
 import math
 import os
+import sys
 import urllib.parse
+
+
+# ── UI scale factor ──────────────────────────────────────────────────
+
+_ui_scale: float | None = None
+
+
+def get_ui_scale() -> float:
+    """Return a scale factor (0.7–1.0) based on primary screen height.
+
+    Baseline is 1080px (typical Windows desktop).  Smaller screens
+    (e.g. 900px MacBook) get proportionally smaller UI elements.
+    Must be called *after* QApplication is created.
+    """
+    global _ui_scale
+    if _ui_scale is not None:
+        return _ui_scale
+    try:
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        if screen:
+            h = screen.availableGeometry().height()
+            _ui_scale = max(0.7, min(1.0, h / 1080))
+        else:
+            _ui_scale = 1.0
+    except Exception:
+        _ui_scale = 1.0
+    return _ui_scale
 
 
 def parse_page_ranges(text: str) -> list[int]:
