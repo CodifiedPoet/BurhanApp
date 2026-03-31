@@ -1,14 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
+import os
 
 is_mac = sys.platform == 'darwin'
 
+_spec_dir = os.path.dirname(os.path.abspath(SPEC))
+
 a = Analysis(
-    ['run_qt.py'],
-    pathex=['src'],
+    [os.path.join(_spec_dir, 'run_qt.py')],
+    pathex=[os.path.join(_spec_dir, 'src')],
     binaries=[],
     datas=[
-        ('assets', 'assets'),
+        (os.path.join(_spec_dir, 'assets'), 'assets'),
+        (os.path.join(_spec_dir, 'src', 'scanmaker'), 'scanmaker'),
     ],
     hiddenimports=[
         'scanmaker',
